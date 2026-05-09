@@ -778,9 +778,9 @@ function rmSA(i){ const a=getSAFromForm(); a.splice(i,1); renderSA(a); }
 
 async function saveSettings(){
   const nc = {
-    email:{ imap_server:document.getElementById('c-imap').value.trim()||'imap.gmail.com', imap_port:993,
-             email_address:document.getElementById('c-email').value.trim(),
-             app_password:document.getElementById('c-pass').value,
+    email:{ imap_server:cfg.email?.imap_server||'imap.gmail.com', imap_port:993,
+             email_address:cfg.email?.email_address||'',
+             app_password:cfg.email?.app_password||'',
              check_interval_minutes:parseInt(document.getElementById('c-interval').value)||5 },
     anthropic_api_key:document.getElementById('c-apikey').value.trim(),
     default_storage_path:document.getElementById('c-defpath').value.trim()||'/mnt/documents/RabbitHole',

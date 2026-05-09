@@ -1,0 +1,15 @@
+services:
+  rabbithole:
+    build: .
+    container_name: rabbithole
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    volumes:
+      - rabbithole-data:/app/data
+      - /mnt:/mnt          # exposes all TrueNAS/NFS mounts to container
+    environment:
+      - TZ=America/New_York
+
+volumes:
+  rabbithole-data:

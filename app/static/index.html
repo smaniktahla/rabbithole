@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RabbitHole</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=Nunito+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:          #090c12;
+      --surface:     #0f1520;
+      --card:        #141c28;
+      --border:      #1a2840;
+      --border-l:    #243347;
+      --text:        #c8d8ea;
+      --text-dim:    #7a9ab8;
+      --text-muted:  #3d5a78;
+      --amber:       #e8a847;
+      --amber-dim:   rgba(232,168,71,.12);
+      --amber-h:     #f0bc6a;
+      --blue:        #4fc3f7;
+      --blue-dim:    rgba(79,195,247,.10);
+      --green:       #4ade80;
+      --green-dim:   rgba(74,222,128,.10);
+      --red:         #f87171;
+      --red-dim:     rgba(248,113,113,.10);
+      --ff-head:     'Syne', sans-serif;
+      --ff-mono:     'DM Mono', monospace;
+      --ff-body:     'Nunito Sans', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      background-image:
+        radial-gradient(ellipse 60% 40% at 15% 0%, rgba(14,28,56,.6) 0%, transparent 70%),
+        radial-gradient(ellipse 50% 50% at 85% 100%, rgba(10,20,40,.5) 0%, transparent 70%);
+      color: var(--text);
+      font-family: var(--ff-body);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-l); border-radius: 3px; }
+
+    /* ── Nav ─── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      height: 54px;
+      display: flex; align-items: center; gap: 0;
+      padding: 0 28px;
+      background: rgba(9,12,18,.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo {
+      font-family: var(--ff-head); font-weight: 800; font-size: 17px;
+      color: var(--amber); letter-spacing: -.3px;
+      display: flex; align-items: center; gap: 7px;
+      margin-right: 36px; user-select: none;
+    }
+    .logo-icon { font-size: 19px; }
+    .nav-tabs { display: flex; height: 100%; }
+    .nav-tab {
+      font-family: var(--ff-head); font-size: 12px; font-weight: 600;
+      letter-spacing: .8px; text-transform: uppercase;
+      padding: 0 18px; height: 100%;
+      display: flex; align-items: center;
+      color: var(--text-muted); border-bottom: 2px solid transparent;
+      cursor: pointer; transition: color .15s, border-color .15s; user-select: none;
+    }
+    .nav-tab:hover { color: var(--text-dim); }
+    .nav-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+    .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .status-pill {
+      font-family: var(--ff-mono); font-size: 10px;
+      padding: 3px 10px; border-radius: 20px;
+      background: var(--green-dim); color: var(--green);
+      border: 1px solid rgba(74,222,128,.2);
+    }
+    .status-pill.idle { background: var(--border); color: var(--text-muted); border-color: var(--border-l); }
+
+    /* ── Layout ─── */
+    .page { max-width: 1080px; margin: 0 auto; padding: 30px 24px; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Shared components ─── */
+    .section-label {
+      font-family: var(--ff-mono); font-size: 9px; font-weight: 500;
+      letter-spacing: 2px; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 10px;
+    }
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px;
+    }
+    .badge {
+      font-family: var(--ff-mono); font-size: 10px; font-weight: 400;
+      padding: 2px 8px; border-radius: 4px; display: inline-block;
+    }
+    .badge-area  { background: var(--blue-dim);  color: var(--blue);  border: 1px solid rgba(79,195,247,.2); }
+    .badge-email { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(232,168,71,.2); }
+    .badge-manual{ background: var(--border);    color: var(--text-muted); border: 1px solid var(--border-l); }
+    .badge-done  { background: var(--green-dim); color: var(--green); }
+    .badge-error { background: var(--red-dim);   color: var(--red); }
+    .badge-queued{ background: var(--amber-dim); color: var(--amber); }
+
+    .tag {
+      font-family: var(--ff-mono); font-size: 10px;
+      padding: 1px 7px; border-radius: 3px;
+      background: var(--border); color: var(--text-muted);
+    }
+    .tags-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+
+    /* ── Capture Tab ─── */
+    .capture-grid {
+      display: grid; grid-template-columns: 1fr 280px; gap: 20px; align-items: start;
+    }
+    .submit-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
+    .url-row { display: flex; gap: 0; margin-bottom: 10px; }
+    .url-input {
+      flex: 1;
+      background: var(--bg); border: 1px solid var(--border); border-right: none;
+      border-radius: 8px 0 0 8px; padding: 11px 14px;
+      font-family: var(--ff-mono); font-size: 12px; color: var(--text);
+      outline: none; transition: border-color .15s;
+    }
+    .url-input::placeholder { color: var(--text-muted); }
+    .url-input:focus { border-color: var(--amber); }
+    .submit-btn {
+      background: var(--amber); color: #08090d;
+      border: none; border-radius: 0 8px 8px 0;
+      padding: 11px 18px;
+      font-family: var(--ff-head); font-size: 12px; font-weight: 700; letter-spacing: .4px;
+      cursor: pointer; white-space: nowrap; transition: background .15s;
+    }
+    .submit-btn:hover { background: var(--amber-h); }
+    .submit-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .area-select {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 7px; padding: 9px 12px;
+      color: var(--text); font-family: var(--ff-body); font-size: 13px;
+      outline: none; cursor: pointer;
+    }
+    .area-select:focus { border-color: var(--amber); }
+
+    /* ── Stats sidebar ─── */
+    .stat-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 7px 0; border-bottom: 1px solid rgba(26,40,64,.7);
+    }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-label { font-size: 12px; color: var(--text-dim); }
+    .stat-value { font-family: var(--ff-mono); font-size: 13px; color: var(--text); }
+    .area-bars { margin-top: 14px; }
+    .bar-item { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .bar-name { font-family: var(--ff-mono); font-size: 10px; color: var(--text-dim); width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-track { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .bar-fill { height: 100%; background: var(--amber); border-radius: 2px; transition: width .6s ease; }
+    .bar-count { font-family: var(--ff-mono); font-size: 10px; color: var(--text-muted); width: 18px; text-align: right; }
+
+    /* ── Item cards ─── */
+    .item-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 16px; margin-bottom: 9px;
+      display: flex; gap: 12px; align-items: flex-start;
+      cursor: pointer; transition: border-color .12s, background .12s;
+    }
+    .item-card:hover { border-color: var(--border-l); background: rgba(20,28,40,.85); }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
+    }
+    .dot-done       { background: var(--green); }
+    .dot-error      { background: var(--red); }
+    .dot-queued     { background: var(--amber); animation: blink 1.8s infinite; }
+    .dot-processing { background: var(--blue); animation: blink-fast 1s infinite; }
+    @keyframes blink      { 0%,100%{opacity:1} 50%{opacity:.25} }
+    @keyframes blink-fast { 0%,100%{opacity:1} 50%{opacity:.4}  }
+
+    .item-body { flex: 1; min-width: 0; }
+    .item-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .item-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 10px; }
+    .item-summary { margin-top: 5px; font-size: 11px; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* ── Email status card ─── */
+    .email-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 14px; }
+    .ghost-btn {
+      width: 100%; margin-top: 10px; padding: 8px;
+      background: var(--border); border: 1px solid var(--border-l);
+      border-radius: 6px; color: var(--text-dim);
+      font-family: var(--ff-mono); font-size: 11px;
+      cursor: pointer; transition: background .15s;
+    }
+    .ghost-btn:hover { background: var(--border-l); color: var(--text); }
+
+    /* ── Library ─── */
+    .lib-controls { display: flex; gap: 10px; margin-bottom: 18px; }
+    .search-input {
+      flex: 1; background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 14px;
+      color: var(--text); font-family: var(--ff-body); font-size: 13px;
+      outline: none; transition: border-color .15s;
+    }
+    .search-input::placeholder { color: var(--text-muted); }
+    .search-input:focus { border-color: var(--amber); }
+    .filter-select {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 9px 14px;
+      color: var(--text); font-family: var(--ff-body); font-size: 13px;
+      outline: none; cursor: pointer; min-width: 150px;
+    }
+    .lib-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 15px 18px; margin-bottom: 8px;
+      cursor: pointer; transition: border-color .12s;
+    }
+    .lib-card:hover { border-color: var(--border-l); }
+    .lib-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 5px; }
+    .lib-title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .lib-badges { display: flex; gap: 5px; flex-shrink: 0; }
+    .lib-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--text-muted); margin-bottom: 5px; }
+    .lib-summary { font-size: 11px; color: var(--text-dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .load-more { width: 100%; padding: 11px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-family: var(--ff-mono); font-size: 11px; cursor: pointer; margin-top: 10px; transition: background .15s; }
+    .load-more:hover { background: rgba(20,28,40,.85); color: var(--text-dim); }
+
+    /* ── Modal ─── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.7); backdrop-filter: blur(5px);
+      z-index: 200; align-items: center; justify-content: center; padding: 20px;
+    }
+    .overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border-l);
+      border-radius: 14px; padding: 26px;
+      max-width: 700px; width: 100%; max-height: 86vh; overflow-y: auto;
+    }
+    .modal-close {
+      float: right; background: var(--border); border: none;
+      color: var(--text-muted); width: 26px; height: 26px;
+      border-radius: 5px; cursor: pointer; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .modal-close:hover { background: var(--red-dim); color: var(--red); }
+    .modal-title { font-family: var(--ff-head); font-size: 18px; font-weight: 700; color: var(--text); margin-bottom: 7px; padding-right: 36px; }
+    .modal-meta { font-family: var(--ff-mono); font-size: 10px; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+    .modal-section { font-family: var(--ff-mono); font-size: 9px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--text-muted); margin: 18px 0 7px; }
+    .modal-summary { font-size: 12px; color: var(--text-dim); line-height: 1.7; white-space: pre-wrap; }
+    .modal-points { list-style: none; }
+    .modal-points li { font-size: 12px; color: var(--text-dim); padding: 3px 0 3px 15px; position: relative; line-height: 1.5; }
+    .modal-points li::before { content: '▸'; position: absolute; left: 0; color: var(--amber); font-size: 9px; top: 4px; }
+    .file-path { font-family: var(--ff-mono); font-size: 10px; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 6px 10px; word-break: break-all; }
+    .modal-footer { margin-top: 18px; display: flex; gap: 8px; }
+    .btn-sm { font-family: var(--ff-mono); font-size: 11px; padding: 7px 13px; border-radius: 6px; cursor: pointer; transition: background .15s; border: 1px solid transparent; }
+    .btn-blue { background: var(--blue-dim); color: var(--blue); border-color: rgba(79,195,247,.2); text-decoration: none; }
+    .btn-blue:hover { background: rgba(79,195,247,.18); }
+    .btn-red  { background: var(--red-dim);  color: var(--red);  border-color: rgba(248,113,113,.2); margin-left: auto; }
+    .btn-red:hover  { background: rgba(248,113,113,.2); }
+
+    /* ── Settings ─── */
+    .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .settings-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+    .settings-card.wide { grid-column: 1 / -1; }
+    .sc-title { font-family: var(--ff-head); font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 15px; display: flex; align-items: center; gap: 7px; }
+    .form-row { margin-bottom: 12px; }
+    .form-label { font-family: var(--ff-mono); font-size: 10px; color: var(--text-muted); letter-spacing: .4px; display: block; margin-bottom: 5px; }
+    .form-input {
+      width: 100%; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 11px;
+      color: var(--text); font-family: var(--ff-mono); font-size: 12px;
+      outline: none; transition: border-color .15s;
+    }
+    .form-input:focus { border-color: var(--amber); }
+    .form-input::placeholder { color: var(--text-muted); }
+
+    /* Subject areas table */
+    .sa-table { width: 100%; border-collapse: collapse; }
+    .sa-table th { font-family: var(--ff-mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-muted); text-align: left; padding: 7px 4px; border-bottom: 1px solid var(--border); }
+    .sa-table td { padding: 6px 4px; border-bottom: 1px solid rgba(26,40,64,.5); vertical-align: middle; }
+    .sa-input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 6px 9px; color: var(--text); font-family: var(--ff-mono); font-size: 11px; outline: none; }
+    .sa-input:focus { border-color: var(--amber); }
+    .sa-rm { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 15px; padding: 2px 5px; border-radius: 3px; transition: color .15s; }
+    .sa-rm:hover { color: var(--red); }
+    .sa-add { font-family: var(--ff-mono); font-size: 11px; padding: 7px 12px; background: var(--border); border: 1px solid var(--border-l); border-radius: 5px; color: var(--text-dim); cursor: pointer; margin-top: 9px; transition: background .15s; }
+    .sa-add:hover { background: var(--border-l); }
+
+    /* Toggle */
+    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .t-slider { position: absolute; cursor: pointer; inset: 0; background: var(--border); border-radius: 20px; transition: .2s; }
+    .t-slider::before { position: absolute; content: ''; height: 14px; width: 14px; left: 3px; bottom: 3px; background: var(--text-muted); border-radius: 50%; transition: .2s; }
+    .toggle input:checked + .t-slider { background: var(--amber-dim); }
+    .toggle input:checked + .t-slider::before { transform: translateX(16px); background: var(--amber); }
+
+    .save-row { grid-column: 1 / -1; display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+    .save-btn { font-family: var(--ff-head); font-size: 13px; font-weight: 700; padding: 11px 26px; background: var(--amber); color: #08090d; border: none; border-radius: 8px; cursor: pointer; transition: background .15s; }
+    .save-btn:hover { background: var(--amber-h); }
+    .save-ok { font-family: var(--ff-mono); font-size: 11px; color: var(--green); opacity: 0; transition: opacity .3s; }
+    .save-ok.show { opacity: 1; }
+
+    /* DocMost fields toggle */
+    .dm-fields { display: none; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 4px; }
+    .dm-fields.open { display: grid; }
+
+    /* Toast */
+    .toast { position: fixed; bottom: 22px; right: 22px; z-index: 400; background: var(--card); border: 1px solid var(--border-l); border-radius: 9px; padding: 11px 16px; font-family: var(--ff-mono); font-size: 11px; color: var(--text); opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; max-width: 300px; pointer-events: none; }
+    .toast.show { opacity: 1; transform: none; }
+    .toast.ok  { border-color: rgba(74,222,128,.3); color: var(--green); }
+    .toast.err { border-color: rgba(248,113,113,.3); color: var(--red); }
+
+    .status-msg { font-family: var(--ff-mono); font-size: 10px; color: var(--blue); margin-top: 4px; }
+    .status-msg.err { color: var(--red); }
+
+    /* Empty state */
+    .empty { text-align: center; padding: 44px 20px; color: var(--text-muted); }
+    .empty-icon { font-size: 36px; margin-bottom: 10px; }
+    .empty-title { font-family: var(--ff-head); font-size: 15px; color: var(--text-dim); margin-bottom: 5px; }
+    .empty-sub { font-size: 12px; }
+
+    @media (max-width: 700px) {
+      .capture-grid, .settings-grid { grid-template-columns: 1fr; }
+      .settings-card.wide { grid-column: 1; }
+      .save-row { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo"><span class="logo-icon">🐇</span>RabbitHole</div>
+  <div class="nav-tabs">
+    <div class="nav-tab active" data-tab="capture">Capture</div>
+    <div class="nav-tab" data-tab="library">Library</div>
+    <div class="nav-tab" data-tab="settings">Settings</div>
+  </div>
+  <div class="nav-right">
+    <span class="status-pill" id="sched-pill">● live</span>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ── CAPTURE ───────────────────────────────────────────────────────────── -->
+  <div class="tab-panel active" id="tab-capture">
+    <div class="capture-grid">
+      <div>
+        <div class="section-label">drop a link</div>
+        <div class="submit-card">
+          <div class="url-row">
+            <input id="url-in" class="url-input" type="url" placeholder="https://youtube.com/watch?v=..." />
+            <button id="submit-btn" class="submit-btn" onclick="submitUrl()">Queue →</button>
+          </div>
+          <select id="area-cap" class="area-select">
+            <option value="">Auto-classify subject area</option>
+          </select>
+        </div>
+
+        <div class="section-label" style="margin-top:22px">recent activity</div>
+        <div id="recent-list"></div>
+      </div>
+
+      <div>
+        <div class="section-label">knowledge base</div>
+        <div class="card">
+          <div class="stat-row"><span class="stat-label">Total entries</span><span class="stat-value" id="s-total">—</span></div>
+          <div class="stat-row"><span class="stat-label">Queue / processing</span><span class="stat-value" id="s-queue">—</span></div>
+          <div class="stat-row"><span class="stat-label">Errors</span><span class="stat-value" id="s-errors">—</span></div>
+          <div class="area-bars" id="area-bars"></div>
+        </div>
+
+        <div class="email-card">
+          <div class="section-label" style="margin-bottom:8px">email polling</div>
+          <div class="stat-row"><span class="stat-label">Last check</span><span class="stat-value" style="font-size:11px" id="last-check">—</span></div>
+          <button class="ghost-btn" onclick="forceEmailCheck()">Check inbox now</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LIBRARY ───────────────────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-library">
+    <div class="lib-controls">
+      <input class="search-input" id="search-in" placeholder="Search titles, summaries, tags…" oninput="debouncedSearch()" />
+      <select class="filter-select" id="area-filter" onchange="loadLibrary(true)">
+        <option value="">All areas</option>
+      </select>
+    </div>
+    <div id="lib-list"></div>
+    <button class="load-more" id="load-more" onclick="loadLibrary(false)" style="display:none">Load more</button>
+  </div>
+
+  <!-- ── SETTINGS ──────────────────────────────────────────────────────────── -->
+  <div class="tab-panel" id="tab-settings">
+    <div class="settings-grid">
+
+      <div class="settings-card">
+        <div class="sc-title">📬 Email Polling</div>
+        <div class="form-row"><label class="form-label">IMAP Server</label><input class="form-input" id="c-imap" placeholder="imap.gmail.com" /></div>
+        <div class="form-row"><label class="form-label">Email Address</label><input class="form-input" id="c-email" type="email" placeholder="you@gmail.com" /></div>
+        <div class="form-row"><label class="form-label">App Password</label><input class="form-input" id="c-pass" type="password" placeholder="••••••••••••••••" /></div>
+        <div class="form-row"><label class="form-label">Check Interval (minutes)</label><input class="form-input" id="c-interval" type="number" min="1" max="120" placeholder="5" /></div>
+      </div>
+
+      <div class="settings-card">
+        <div class="sc-title">🔑 API & Storage</div>
+        <div class="form-row"><label class="form-label">Anthropic API Key</label><input class="form-input" id="c-apikey" type="password" placeholder="sk-ant-..." /></div>
+        <div class="form-row"><label class="form-label">Default Storage Path</label><input class="form-input" id="c-defpath" placeholder="/mnt/documents/RabbitHole" /></div>
+        <div class="form-row"><label class="form-label">Default Subject Area (fallback)</label><input class="form-input" id="c-defarea" placeholder="misc" /></div>
+      </div>
+
+      <div class="settings-card wide">
+        <div class="sc-title">🗂 Subject Areas → Storage Paths</div>
+        <table class="sa-table">
+          <thead><tr><th style="width:32%">Name</th><th>Storage Path on Host</th><th style="width:36px"></th></tr></thead>
+          <tbody id="sa-rows"></tbody>
+        </table>
+        <button class="sa-add" onclick="addSA()">+ Add subject area</button>
+      </div>
+
+      <div class="settings-card wide">
+        <div class="sc-title" style="justify-content:space-between">
+          <span>📚 DocMost (Direct DB)</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-family:var(--ff-mono);font-size:10px;color:var(--text-muted)">Enabled</span>
+            <label class="toggle"><input type="checkbox" id="c-dm-on" onchange="toggleDM()" /><span class="t-slider"></span></label>
+          </div>
+        </div>
+        <div class="dm-fields" id="dm-fields">
+          <div class="form-row" style="margin:0"><label class="form-label">Postgres Host</label><input class="form-input" id="c-dm-url" placeholder="10.10.10.201" /></div>
+          <div class="form-row" style="margin:0"><label class="form-label">DB Password</label><input class="form-input" id="c-dm-tok" type="password" placeholder="••••••••" /></div>
+          <div class="form-row" style="margin:0"><label class="form-label">Space ID</label><input class="form-input" id="c-dm-space" placeholder="0196753b-…" /></div>
+        </div>
+      </div>
+
+      <div class="save-row">
+        <span class="save-ok" id="save-ok">✓ Saved</span>
+        <button class="save-btn" onclick="saveSettings()">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /page -->
+
+<!-- Modal -->
+<div class="overlay" id="overlay" onclick="closeOverlay(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div class="modal-title" id="m-title"></div>
+    <div class="modal-meta" id="m-meta"></div>
+    <div id="m-badges" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px"></div>
+    <div class="modal-section">Summary</div>
+    <div class="modal-summary" id="m-summary"></div>
+    <div class="modal-section" id="m-kp-label" style="display:none">Key Points</div>
+    <ul class="modal-points" id="m-kp"></ul>
+    <div class="modal-section">File on Disk</div>
+    <div class="file-path" id="m-path">—</div>
+    <div class="modal-footer" id="m-footer"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let cfg = {};
+let libOffset = 0;
+let searchTimer = null;
+
+/* ── Tab nav ──────────────────────────────────────────────────────────────── */
+document.querySelectorAll('.nav-tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.nav-tab').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.getElementById('tab-' + t.dataset.tab).classList.add('active');
+  if (t.dataset.tab === 'library') loadLibrary(true);
+  if (t.dataset.tab === 'settings') loadSettings();
+}));
+
+document.getElementById('url-in').addEventListener('keydown', e => { if(e.key==='Enter') submitUrl(); });
+
+/* ── Toast ────────────────────────────────────────────────────────────────── */
+let toastTimer;
+function toast(msg, type='') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'toast show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className='toast', 3200);
+}
+
+/* ── Helpers ──────────────────────────────────────────────────────────────── */
+function ago(ds) {
+  if(!ds) return '—';
+  const s = (Date.now() - new Date(ds)) / 1000;
+  if(s < 60) return 'just now';
+  if(s < 3600) return Math.floor(s/60)+'m ago';
+  if(s < 86400) return Math.floor(s/3600)+'h ago';
+  return Math.floor(s/86400)+'d ago';
+}
+function areaBadge(a) { return a ? `<span class="badge badge-area">${a}</span>` : ''; }
+function srcBadge(s)  { return `<span class="badge badge-${s||'manual'}">${s||'manual'}</span>`; }
+function tagsHtml(t)  {
+  const arr = Array.isArray(t) ? t : [];
+  return arr.map(x=>`<span class="tag">${x}</span>`).join('');
+}
+function dot(status)  { return `<span class="status-dot dot-${status}"></span>`; }
+
+/* ── Capture ──────────────────────────────────────────────────────────────── */
+async function submitUrl() {
+  const url = document.getElementById('url-in').value.trim();
+  const area = document.getElementById('area-cap').value;
+  if(!url){ toast('Paste a YouTube URL first','err'); return; }
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true; btn.textContent = '...';
+  try {
+    const r = await fetch('/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url, subject_area: area||null})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Error');
+    document.getElementById('url-in').value = '';
+    toast('Queued ✓ — processing within ~1 min','ok');
+    loadStats(); loadRecent();
+  } catch(e){ toast(e.message,'err'); }
+  finally { btn.disabled=false; btn.textContent='Queue →'; }
+}
+
+async function loadStats() {
+  try {
+    const [st, sv] = await Promise.all([fetch('/api/stats').then(r=>r.json()), fetch('/api/status').then(r=>r.json())]);
+    document.getElementById('s-total').textContent  = st.total;
+    document.getElementById('s-queue').textContent  = st.queued + st.processing;
+    document.getElementById('s-errors').textContent = st.errors;
+    document.getElementById('last-check').textContent = ago(sv.last_email_check?.time);
+    document.getElementById('sched-pill').className = sv.scheduler_running ? 'status-pill' : 'status-pill idle';
+    document.getElementById('sched-pill').textContent = sv.scheduler_running ? '● live' : '● stopped';
+
+    const max = Math.max(...(st.by_subject_area||[]).map(a=>a.count), 1);
+    document.getElementById('area-bars').innerHTML = (st.by_subject_area||[]).slice(0,7).map(a=>`
+      <div class="bar-item">
+        <span class="bar-name">${a.subject_area||'misc'}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(a.count/max*100).toFixed(0)}%"></div></div>
+        <span class="bar-count">${a.count}</span>
+      </div>`).join('');
+
+    fillAreaDropdowns();
+  } catch(e){ console.error(e); }
+}
+
+function fillAreaDropdowns() {
+  const opts = (cfg.subject_areas||[]).map(a=>`<option value="${a.name}">${a.name}</option>`).join('');
+  document.getElementById('area-cap').innerHTML    = '<option value="">Auto-classify subject area</option>' + opts;
+  const af = document.getElementById('area-filter');
+  const cur = af.value;
+  af.innerHTML = '<option value="">All areas</option>' + opts;
+  af.value = cur;
+}
+
+async function loadRecent() {
+  try {
+    const d = await fetch('/api/library?limit=6&include_active=1').then(r=>r.json());
+    const items = d.items||[];
+    if(!items.length){
+      document.getElementById('recent-list').innerHTML = `<div class="empty"><div class="empty-icon">🕳</div><div class="empty-title">Nothing yet</div><div class="empty-sub">Paste a YouTube link above to begin</div></div>`;
+      return;
+    }
+    document.getElementById('recent-list').innerHTML = items.map(itemCard).join('');
+  } catch(e){ console.error(e); }
+}
+
+function itemCard(item) {
+  const tags = Array.isArray(item.tags)?item.tags:[];
+  const statusMsg = item.status_message ? `<div class="status-msg">⚙ ${item.status_message}</div>` : '';
+  const errMsg = item.error_message ? `<div class="status-msg err">✕ ${item.error_message}</div>` : '';
+  return `<div class="item-card" onclick="openModal(${item.id})">
+    ${dot(item.status)}
+    <div class="item-body">
+      <div class="item-title">${item.title||item.url}</div>
+      <div class="item-meta">
+        ${item.channel?`<span>📺 ${item.channel}</span>`:''}
+        ${item.processed_at?`<span>${ago(item.processed_at)}</span>`:''}
+        ${areaBadge(item.subject_area)} ${srcBadge(item.source)}
+      </div>
+      ${statusMsg}${errMsg}
+      ${item.summary?`<div class="item-summary">${item.summary}</div>`:''}
+      ${tags.length?`<div class="tags-row">${tagsHtml(tags)}</div>`:''}
+    </div>
+  </div>`;
+}
+
+async function forceEmailCheck() {
+  try {
+    const d = await fetch('/api/check-email',{method:'POST'}).then(r=>r.json());
+    toast(`Inbox checked — ${d.queued} new item(s) queued`,'ok');
+    loadStats(); loadRecent();
+  } catch(e){ toast('Check failed','err'); }
+}
+
+/* ── Library ──────────────────────────────────────────────────────────────── */
+async function loadLibrary(reset=true) {
+  if(reset){ libOffset=0; document.getElementById('lib-list').innerHTML=''; }
+  const search = document.getElementById('search-in').value.trim();
+  const area   = document.getElementById('area-filter').value;
+  const p = new URLSearchParams({limit:20, offset:libOffset, ...(search&&{search}), ...(area&&{subject_area:area})});
+  try {
+    const d = await fetch('/api/library?'+p).then(r=>r.json());
+    const items = d.items||[];
+    if(!items.length && libOffset===0){
+      document.getElementById('lib-list').innerHTML = `<div class="empty"><div class="empty-icon">📭</div><div class="empty-title">Nothing here</div><div class="empty-sub">No entries match your filter</div></div>`;
+      document.getElementById('load-more').style.display='none';
+      return;
+    }
+    document.getElementById('lib-list').innerHTML += items.map(item=>{
+      const tags = Array.isArray(item.tags)?item.tags:[];
+      return `<div class="lib-card" onclick="openModal(${item.id})">
+        <div class="lib-header">
+          <div class="lib-title">${item.title||item.url}</div>
+          <div class="lib-badges">${areaBadge(item.subject_area)} ${srcBadge(item.source)}</div>
+        </div>
+        <div class="lib-meta">${item.channel?item.channel+' · ':''}${ago(item.processed_at)}</div>
+        ${item.summary?`<div class="lib-summary">${item.summary}</div>`:''}
+        ${tags.length?`<div class="tags-row">${tagsHtml(tags)}</div>`:''}
+      </div>`;
+    }).join('');
+    libOffset += items.length;
+    document.getElementById('load-more').style.display = items.length===20 ? 'block' : 'none';
+  } catch(e){ console.error(e); }
+}
+
+function debouncedSearch(){ clearTimeout(searchTimer); searchTimer=setTimeout(()=>loadLibrary(true),280); }
+
+/* ── Modal ────────────────────────────────────────────────────────────────── */
+async function openModal(id) {
+  try {
+    const item = await fetch('/api/library/'+id).then(r=>r.json());
+    const tags  = Array.isArray(item.tags)?item.tags:[];
+    document.getElementById('m-title').textContent = item.title||item.url;
+    document.getElementById('m-meta').innerHTML =
+      (item.channel?`<span>📺 ${item.channel}</span>`:'') +
+      (item.processed_at?`<span>📅 ${new Date(item.processed_at).toLocaleDateString()}</span>`:'') +
+      `<span>🔗 <a href="${item.url}" target="_blank" style="color:var(--blue)">${item.url.slice(0,60)}…</a></span>`;
+    document.getElementById('m-badges').innerHTML = areaBadge(item.subject_area)+' '+srcBadge(item.source);
+    document.getElementById('m-summary').textContent = item.summary||'No summary available.';
+    document.getElementById('m-path').textContent = item.file_path||'Not yet written to disk';
+
+    // Key points from full item — summary only stored; show tags
+    const kpLabel = document.getElementById('m-kp-label');
+    const kpEl    = document.getElementById('m-kp');
+    kpEl.innerHTML = '';
+    kpLabel.style.display = 'none';
+
+    if(tags.length){
+      document.getElementById('m-summary').insertAdjacentHTML('afterend',
+        `<div class="modal-section">Tags</div><div class="tags-row" style="margin-bottom:4px">${tagsHtml(tags)}</div>`);
+    }
+
+    document.getElementById('m-footer').innerHTML =
+      `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on YouTube ↗</a>` +
+      (item.file_path?`<a href="/api/library/${item.id}/file" target="_blank" class="btn-sm btn-blue">Open Doc ↗</a>`:'') +
+      (item.docmost_page_id
+        ? `<span class="btn-sm btn-blue" style="cursor:default;opacity:.65">DocMost ✓</span>`
+        : (item.file_path ? `<button class="btn-sm btn-blue" onclick="syncDocmost(${item.id})">Sync to DocMost</button>` : '')) +
+      `<button class="btn-sm btn-red" onclick="delItem(${item.id})">Remove</button>`;
+
+    document.getElementById('overlay').classList.add('open');
+  } catch(e){ toast('Could not load item','err'); }
+}
+
+function closeModal() { document.getElementById('overlay').classList.remove('open'); }
+function closeOverlay(e){ if(e.target.id==='overlay') closeModal(); }
+
+async function syncDocmost(id){
+  try {
+    const r = await fetch(`/api/library/${id}/sync-docmost`, {method:'POST'});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Sync failed');
+    toast('Synced to DocMost ✓','ok');
+    openModal(id); // refresh modal to show DocMost ✓
+  } catch(e){ toast(e.message,'err'); }
+}
+
+async function delItem(id){
+  if(!confirm('Remove from RabbitHole? (File on disk is not deleted)')) return;
+  await fetch('/api/library/'+id,{method:'DELETE'});
+  closeModal(); toast('Entry removed','ok');
+  loadStats(); loadRecent();
+  if(document.getElementById('tab-library').classList.contains('active')) loadLibrary(true);
+}
+
+/* ── Settings ─────────────────────────────────────────────────────────────── */
+async function loadSettings(){
+  try {
+    cfg = await fetch('/api/config').then(r=>r.json());
+    document.getElementById('c-imap').value    = cfg.email?.imap_server||'';
+    document.getElementById('c-email').value   = cfg.email?.email_address||'';
+    document.getElementById('c-pass').value    = cfg.email?.app_password||'';
+    document.getElementById('c-interval').value= cfg.email?.check_interval_minutes||5;
+    document.getElementById('c-apikey').value  = cfg.anthropic_api_key||'';
+    document.getElementById('c-defpath').value = cfg.default_storage_path||'';
+    document.getElementById('c-defarea').value = cfg.default_subject_area||'misc';
+    document.getElementById('c-dm-on').checked = cfg.docmost?.enabled||false;
+    document.getElementById('c-dm-url').value  = cfg.docmost?.db_host||'';
+    document.getElementById('c-dm-tok').value  = cfg.docmost?.db_password||'';
+    document.getElementById('c-dm-space').value= cfg.docmost?.space_id||'';
+    toggleDM(); renderSA(cfg.subject_areas||[]);
+  } catch(e){ console.error(e); }
+}
+
+function toggleDM(){
+  const on = document.getElementById('c-dm-on').checked;
+  document.getElementById('dm-fields').className = 'dm-fields'+(on?' open':'');
+}
+
+function getBasePath(){
+  return (document.getElementById('c-defpath')?.value?.trim() || '/mnt/documents/RabbitHole');
+}
+
+function autoPath(nameInput){
+  const row = nameInput.closest('tr');
+  const pathInput = row.querySelector('[data-f="path"]');
+  // Only auto-fill if path is empty or was previously auto-generated
+  const base = getBasePath();
+  const name = nameInput.value.trim().toLowerCase().replace(/\s+/g,'-');
+  if(!pathInput.value || pathInput.dataset.auto === '1'){
+    pathInput.value = name ? `${base}/${name}` : '';
+    pathInput.dataset.auto = '1';
+  }
+}
+
+function renderSA(areas){
+  document.getElementById('sa-rows').innerHTML = areas.map((a,i)=>`
+    <tr>
+      <td><input class="sa-input" data-i="${i}" data-f="name" value="${a.name||''}" placeholder="ai-ml" oninput="autoPath(this)" /></td>
+      <td><input class="sa-input" data-i="${i}" data-f="path" value="${a.path||''}" placeholder="/mnt/documents/RabbitHole/ai-ml" oninput="this.dataset.auto='0'" /></td>
+      <td><button class="sa-rm" onclick="rmSA(${i})">×</button></td>
+    </tr>`).join('');
+}
+
+function getSAFromForm(){
+  return Array.from(document.querySelectorAll('#sa-rows tr')).map(r=>({
+    name: r.querySelector('[data-f="name"]')?.value?.trim()||'',
+    path: r.querySelector('[data-f="path"]')?.value?.trim()||''
+  })).filter(a=>a.name);
+}
+
+function addSA(){ renderSA([...getSAFromForm(), {name:'',path:''}]); }
+function rmSA(i){ const a=getSAFromForm(); a.splice(i,1); renderSA(a); }
+
+async function saveSettings(){
+  const nc = {
+    email:{ imap_server:document.getElementById('c-imap').value.trim()||'imap.gmail.com', imap_port:993,
+             email_address:document.getElementById('c-email').value.trim(),
+             app_password:document.getElementById('c-pass').value,
+             check_interval_minutes:parseInt(document.getElementById('c-interval').value)||5 },
+    anthropic_api_key:document.getElementById('c-apikey').value.trim(),
+    default_storage_path:document.getElementById('c-defpath').value.trim()||'/mnt/documents/RabbitHole',
+    default_subject_area:document.getElementById('c-defarea').value.trim()||'misc',
+    subject_areas:getSAFromForm(),
+    docmost:{ enabled:document.getElementById('c-dm-on').checked,
+              db_host:document.getElementById('c-dm-url').value.trim(),
+              db_password:document.getElementById('c-dm-tok').value,
+              space_id:document.getElementById('c-dm-space').value.trim() }
+  };
+  try {
+    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nc)});
+    cfg = nc; fillAreaDropdowns();
+    const ok = document.getElementById('save-ok');
+    ok.className='save-ok show'; setTimeout(()=>ok.className='save-ok',2800);
+    toast('Settings saved ✓','ok');
+  } catch(e){ toast('Save failed: '+e.message,'err'); }
+}
+
+/* ── Init ─────────────────────────────────────────────────────────────────── */
+async function init(){
+  try { cfg = await fetch('/api/config').then(r=>r.json()); } catch(_){}
+  fillAreaDropdowns();
+  loadStats();
+  loadRecent();
+  setInterval(()=>{ loadStats(); if(document.querySelector('.nav-tab.active')?.dataset.tab==='capture') loadRecent(); }, 28000);
+}
+init();
+</script>
+</body>
+</html>

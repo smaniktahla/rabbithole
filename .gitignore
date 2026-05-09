@@ -1,0 +1,26 @@
+# Runtime data (Docker volume contents if mounted locally)
+data/
+*.db
+*.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Secrets / local config
+.env
+*.env
+config.json
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

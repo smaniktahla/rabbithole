@@ -273,27 +273,27 @@ def gmail_oauth_status():
     return {"connected": is_connected()}
 
 
-@app.get("/api/oauth/gmail/start")
-def gmail_oauth_start(request: Request):
+@app.get("/api/oauth/gmail/auth-url")
+def gmail_oauth_auth_url():
     config = load_config()
     oauth_cfg = config.get("gmail_oauth", {})
     if not oauth_cfg.get("client_id") or not oauth_cfg.get("client_secret"):
-        raise HTTPException(400, "Gmail OAuth credentials not configured — set Client ID and Secret in Settings first")
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/gmail/callback"
+        raise HTTPException(400, "Gmail OAuth credentials not configured — save Client ID and Secret in Settings first")
     from gmail_oauth import get_auth_url
-    return RedirectResponse(get_auth_url(oauth_cfg["client_id"], oauth_cfg["client_secret"], redirect_uri))
+    return {"url": get_auth_url(oauth_cfg["client_id"], oauth_cfg["client_secret"])}
 
 
-@app.get("/api/oauth/gmail/callback")
-def gmail_oauth_callback(request: Request, code: str = None, error: str = None):
-    if error or not code:
-        return RedirectResponse("/?oauth=error")
+class OAuthExchangeRequest(BaseModel):
+    code_or_url: str
+
+
+@app.post("/api/oauth/gmail/exchange")
+def gmail_oauth_exchange(req: OAuthExchangeRequest):
     config = load_config()
     oauth_cfg = config.get("gmail_oauth", {})
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/gmail/callback"
     from gmail_oauth import exchange_code
-    exchange_code(oauth_cfg["client_id"], oauth_cfg["client_secret"], redirect_uri, code)
-    return RedirectResponse("/?oauth=success")
+    exchange_code(oauth_cfg["client_id"], oauth_cfg["client_secret"], req.code_or_url)
+    return {"ok": True}
 
 
 @app.post("/api/oauth/gmail/disconnect")

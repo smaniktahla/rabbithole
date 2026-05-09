@@ -8,6 +8,7 @@ logger = logging.getLogger(rabbithole.gmail_oauth)
 
 SCOPES = [https://www.googleapis.com/auth/gmail.modify]
 TOKEN_PATH = /app/data/gmail_token.json
+_REDIRECT_URI = http://localhost
 
 
 def _load_creds():
@@ -39,29 +40,38 @@ def is_connected() -> bool:
     return _load_creds() is not None
 
 
-def _make_flow(client_id: str, client_secret: str, redirect_uri: str):
+def _make_flow(client_id: str, client_secret: str):
     from google_auth_oauthlib.flow import Flow
     return Flow.from_client_config(
-        {"web": {
+        {"installed": {
             "client_id": client_id,
             "client_secret": client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [redirect_uri],
+            "redirect_uris": [_REDIRECT_URI],
         }},
         scopes=SCOPES,
-        redirect_uri=redirect_uri,
+        redirect_uri=_REDIRECT_URI,
     )
 
 
-def get_auth_url(client_id: str, client_secret: str, redirect_uri: str) -> str:
-    flow = _make_flow(client_id, client_secret, redirect_uri)
+def get_auth_url(client_id: str, client_secret: str) -> str:
+    flow = _make_flow(client_id, client_secret)
     url, _ = flow.authorization_url(access_type="offline", prompt="consent")
     return url
 
 
-def exchange_code(client_id: str, client_secret: str, redirect_uri: str, code: str) -> None:
-    flow = _make_flow(client_id, client_secret, redirect_uri)
+def exchange_code(client_id: str, client_secret: str, code_or_url: str) -> None:
+    """Accept either the full redirect URL or just the bare code string."""
+    import re
+    if code_or_url.startswith("http"):
+        m = re.search(r"[?&]code=([^&]+)", code_or_url)
+        if not m:
+            raise ValueError("Could not find code= parameter in the pasted URL")
+        code = m.group(1)
+    else:
+        code = code_or_url.strip()
+    flow = _make_flow(client_id, client_secret)
     flow.fetch_token(code=code)
     _save_creds(flow.credentials)
 

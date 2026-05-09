@@ -452,6 +452,26 @@
 
 </div><!-- /page -->
 
+<!-- OAuth Modal -->
+<div class="overlay" id="oauth-overlay" onclick="closeOAuthOverlay(event)">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-close" onclick="closeOAuthModal()">&#x2715;</button>
+    <div class="modal-title">Connect Gmail</div>
+    <div style="margin:14px 0 10px;font-size:12px;color:var(--text-dim);line-height:1.7">
+      <strong style="color:var(--text)">Step 1</strong> &mdash; Click the button below to open Google authorization in a new tab.
+    </div>
+    <a id="oauth-link" href="#" target="_blank" class="btn-sm btn-blue" style="display:inline-block;margin-bottom:18px;font-size:12px">Authorize with Google &rarr;</a>
+    <div style="margin-bottom:10px;font-size:12px;color:var(--text-dim);line-height:1.7">
+      <strong style="color:var(--text)">Step 2</strong> &mdash; After authorizing, Google will redirect to a <code style="font-size:11px;color:var(--amber)">localhost</code> page that won't load. Copy the full URL from your browser's address bar and paste it below.
+    </div>
+    <textarea id="oauth-code-input" class="form-input" rows="3" placeholder="http://localhost/?code=4/0AQSTgQ..." style="resize:vertical;font-size:11px"></textarea>
+    <div class="modal-footer" style="margin-top:14px">
+      <button class="btn-sm btn-blue" onclick="submitOAuthCode()" id="oauth-submit-btn">Connect</button>
+      <span id="oauth-error" style="font-family:var(--ff-mono);font-size:11px;color:var(--red);display:none"></span>
+    </div>
+  </div>
+</div>
+
 <!-- Modal -->
 <div class="overlay" id="overlay" onclick="closeOverlay(event)">
   <div class="modal">
@@ -807,37 +827,56 @@ async function refreshOAuthStatus() {
   } catch(e) { console.error(e); }
 }
 
-function handleOAuthBtn() {
+async function handleOAuthBtn() {
   const btn = document.getElementById('oauth-btn');
-  if (btn.dataset.action === 'connect') {
-    window.location.href = '/api/oauth/gmail/start';
-  } else {
-    disconnectGmail();
-  }
+  if (btn.dataset.action === 'disconnect') { disconnectGmail(); return; }
+  try {
+    const r = await fetch('/api/oauth/gmail/auth-url');
+    const d = await r.json();
+    if (!r.ok) { toast(d.detail || 'Save Client ID + Secret first', 'err'); return; }
+    document.getElementById('oauth-link').href = d.url;
+    document.getElementById('oauth-code-input').value = '';
+    document.getElementById('oauth-error').style.display = 'none';
+    document.getElementById('oauth-overlay').classList.add('open');
+  } catch(e) { toast('Could not generate auth URL', 'err'); }
+}
+
+function closeOAuthModal() { document.getElementById('oauth-overlay').classList.remove('open'); }
+function closeOAuthOverlay(e) { if(e.target.id==='oauth-overlay') closeOAuthModal(); }
+
+async function submitOAuthCode() {
+  const val = document.getElementById('oauth-code-input').value.trim();
+  if (!val) { showOAuthError('Paste the redirect URL first'); return; }
+  const btn = document.getElementById('oauth-submit-btn');
+  btn.disabled = true; btn.textContent = 'Connecting...';
+  try {
+    const r = await fetch('/api/oauth/gmail/exchange', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code_or_url: val})
+    });
+    const d = await r.json();
+    if (!r.ok) { showOAuthError(d.detail || 'Exchange failed'); return; }
+    closeOAuthModal();
+    toast('Gmail connected ✓', 'ok');
+    refreshOAuthStatus();
+  } catch(e) { showOAuthError(e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Connect'; }
+}
+
+function showOAuthError(msg) {
+  const el = document.getElementById('oauth-error');
+  el.textContent = msg; el.style.display = 'inline';
 }
 
 async function disconnectGmail() {
   if (!confirm('Disconnect Gmail OAuth? Email polling will stop until reconnected.')) return;
   await fetch('/api/oauth/gmail/disconnect', {method:'POST'});
-  toast('Gmail disconnected','ok');
+  toast('Gmail disconnected', 'ok');
   refreshOAuthStatus();
 }
 
-function checkOAuthParam() {
-  const status = new URLSearchParams(location.search).get('oauth');
-  if (!status) return;
-  history.replaceState({}, '', location.pathname);
-  if (status === 'success') {
-    toast('Gmail connected successfully ✓','ok');
-    document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
-    document.querySelectorAll('.tab-panel').forEach(x=>x.classList.remove('active'));
-    document.querySelector('[data-tab="settings"]').classList.add('active');
-    document.getElementById('tab-settings').classList.add('active');
-    loadSettings();
-  } else {
-    toast('Gmail OAuth authorization failed','err');
-  }
-}
+function checkOAuthParam() {}
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 async function init(){

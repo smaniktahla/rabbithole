@@ -50,6 +50,16 @@ def get_email_body(msg) -> str:
 def check_email() -> int:
     """Check inbox for YouTube links. Returns count of newly queued items."""
     config = load_config()
+
+    # Prefer Gmail OAuth when a token is stored
+    try:
+        from gmail_oauth import is_connected, check_email_oauth
+        if is_connected():
+            return check_email_oauth()
+    except Exception as e:
+        logger.error(f"Gmail OAuth check failed: {e}", exc_info=True)
+
+    # Fall back to IMAP + app password
     ecfg = config.get("email", {})
 
     if not ecfg.get("email_address") or not ecfg.get("app_password"):

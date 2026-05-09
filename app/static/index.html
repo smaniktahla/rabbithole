@@ -400,9 +400,15 @@
 
       <div class="settings-card">
         <div class="sc-title">📬 Email Polling</div>
-        <div class="form-row"><label class="form-label">IMAP Server</label><input class="form-input" id="c-imap" placeholder="imap.gmail.com" /></div>
-        <div class="form-row"><label class="form-label">Email Address</label><input class="form-input" id="c-email" type="email" placeholder="you@gmail.com" /></div>
-        <div class="form-row"><label class="form-label">App Password</label><input class="form-input" id="c-pass" type="password" placeholder="••••••••••••••••" /></div>
+        <div id="oauth-status" style="margin-bottom:14px;padding:10px 12px;border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div>
+            <div style="font-family:var(--ff-mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted);margin-bottom:4px">Gmail Connection</div>
+            <div id="oauth-label" style="font-size:12px;color:var(--text-dim)">Checking...</div>
+          </div>
+          <button id="oauth-btn" class="btn-sm btn-blue" style="white-space:nowrap" onclick="handleOAuthBtn()">...</button>
+        </div>
+        <div class="form-row"><label class="form-label">OAuth Client ID</label><input class="form-input" id="c-gm-id" placeholder="123456789-xxx.apps.googleusercontent.com" /></div>
+        <div class="form-row"><label class="form-label">OAuth Client Secret</label><input class="form-input" id="c-gm-secret" type="password" placeholder="GOCSPX-..." /></div>
         <div class="form-row"><label class="form-label">Check Interval (minutes)</label><input class="form-input" id="c-interval" type="number" min="1" max="120" placeholder="5" /></div>
       </div>
 
@@ -703,7 +709,10 @@ async function loadSettings(){
     document.getElementById('c-dm-url').value  = cfg.docmost?.db_host||'';
     document.getElementById('c-dm-tok').value  = cfg.docmost?.db_password||'';
     document.getElementById('c-dm-space').value= cfg.docmost?.space_id||'';
+    document.getElementById('c-gm-id').value    = cfg.gmail_oauth?.client_id||'';
+    document.getElementById('c-gm-secret').value= cfg.gmail_oauth?.client_secret||'';
     toggleDM(); renderSA(cfg.subject_areas||[]);
+    refreshOAuthStatus();
   } catch(e){ console.error(e); }
 }
 
@@ -760,7 +769,9 @@ async function saveSettings(){
     docmost:{ enabled:document.getElementById('c-dm-on').checked,
               db_host:document.getElementById('c-dm-url').value.trim(),
               db_password:document.getElementById('c-dm-tok').value,
-              space_id:document.getElementById('c-dm-space').value.trim() }
+              space_id:document.getElementById('c-dm-space').value.trim() },
+    gmail_oauth:{ client_id:document.getElementById('c-gm-id').value.trim(),
+                  client_secret:document.getElementById('c-gm-secret').value }
   };
   try {
     await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nc)});
@@ -771,8 +782,66 @@ async function saveSettings(){
   } catch(e){ toast('Save failed: '+e.message,'err'); }
 }
 
+/* ── Gmail OAuth ──────────────────────────────────────────────────────────── */
+async function refreshOAuthStatus() {
+  try {
+    const d = await fetch('/api/oauth/gmail/status').then(r=>r.json());
+    const label = document.getElementById('oauth-label');
+    const btn   = document.getElementById('oauth-btn');
+    const box   = document.getElementById('oauth-status');
+    if (d.connected) {
+      label.textContent = 'Connected';
+      label.style.color = 'var(--green)';
+      box.style.borderColor = 'rgba(74,222,128,.3)';
+      btn.textContent = 'Disconnect';
+      btn.className = 'btn-sm btn-red';
+      btn.dataset.action = 'disconnect';
+    } else {
+      label.textContent = 'Not connected';
+      label.style.color = 'var(--text-dim)';
+      box.style.borderColor = 'var(--border)';
+      btn.textContent = 'Connect Gmail';
+      btn.className = 'btn-sm btn-blue';
+      btn.dataset.action = 'connect';
+    }
+  } catch(e) { console.error(e); }
+}
+
+function handleOAuthBtn() {
+  const btn = document.getElementById('oauth-btn');
+  if (btn.dataset.action === 'connect') {
+    window.location.href = '/api/oauth/gmail/start';
+  } else {
+    disconnectGmail();
+  }
+}
+
+async function disconnectGmail() {
+  if (!confirm('Disconnect Gmail OAuth? Email polling will stop until reconnected.')) return;
+  await fetch('/api/oauth/gmail/disconnect', {method:'POST'});
+  toast('Gmail disconnected','ok');
+  refreshOAuthStatus();
+}
+
+function checkOAuthParam() {
+  const status = new URLSearchParams(location.search).get('oauth');
+  if (!status) return;
+  history.replaceState({}, '', location.pathname);
+  if (status === 'success') {
+    toast('Gmail connected successfully ✓','ok');
+    document.querySelectorAll('.nav-tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(x=>x.classList.remove('active'));
+    document.querySelector('[data-tab="settings"]').classList.add('active');
+    document.getElementById('tab-settings').classList.add('active');
+    loadSettings();
+  } else {
+    toast('Gmail OAuth authorization failed','err');
+  }
+}
+
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 async function init(){
+  checkOAuthParam();
   try { cfg = await fetch('/api/config').then(r=>r.json()); } catch(_){}
   fillAreaDropdowns();
   loadStats();

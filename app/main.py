@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -208,6 +208,8 @@ def get_config():
         safe["anthropic_api_key"] = "sk-ant-..." + safe["anthropic_api_key"][-4:]
     if safe.get("docmost", {}).get("db_password"):
         safe["docmost"]["db_password"] = "••••••••"
+    if safe.get("gmail_oauth", {}).get("client_secret"):
+        safe["gmail_oauth"]["client_secret"] = "••••••••"
     return safe
 
 
@@ -261,6 +263,44 @@ def get_item_file(item_id: int):
         raise HTTPException(404, f"File does not exist on disk: {fp}")
     return FileResponse(fp, media_type="text/markdown",
                         filename=os.path.basename(fp))
+
+
+
+
+@app.get("/api/oauth/gmail/status")
+def gmail_oauth_status():
+    from gmail_oauth import is_connected
+    return {"connected": is_connected()}
+
+
+@app.get("/api/oauth/gmail/start")
+def gmail_oauth_start(request: Request):
+    config = load_config()
+    oauth_cfg = config.get("gmail_oauth", {})
+    if not oauth_cfg.get("client_id") or not oauth_cfg.get("client_secret"):
+        raise HTTPException(400, "Gmail OAuth credentials not configured — set Client ID and Secret in Settings first")
+    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/gmail/callback"
+    from gmail_oauth import get_auth_url
+    return RedirectResponse(get_auth_url(oauth_cfg["client_id"], oauth_cfg["client_secret"], redirect_uri))
+
+
+@app.get("/api/oauth/gmail/callback")
+def gmail_oauth_callback(request: Request, code: str = None, error: str = None):
+    if error or not code:
+        return RedirectResponse("/?oauth=error")
+    config = load_config()
+    oauth_cfg = config.get("gmail_oauth", {})
+    redirect_uri = str(request.base_url).rstrip("/") + "/api/oauth/gmail/callback"
+    from gmail_oauth import exchange_code
+    exchange_code(oauth_cfg["client_id"], oauth_cfg["client_secret"], redirect_uri, code)
+    return RedirectResponse("/?oauth=success")
+
+
+@app.post("/api/oauth/gmail/disconnect")
+def gmail_oauth_disconnect():
+    from gmail_oauth import disconnect
+    disconnect()
+    return {"ok": True}
 
 
 app.mount("/static", StaticFiles(directory="/app/static"), name="static")

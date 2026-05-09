@@ -21,6 +21,10 @@ DEFAULT_CONFIG = {
         "space_id": "0196753b-62a3-7d2b-8d23-473d8bd58bff"
     },
     "default_subject_area": "misc",
+    "gmail_oauth": {
+        "client_id": "",
+        "client_secret": ""
+    },
     "default_storage_path": "/mnt/documents/RabbitHole"
 }
 
@@ -40,6 +44,9 @@ def load_config() -> Dict[str, Any]:
     merged_dm = DEFAULT_CONFIG["docmost"].copy()
     merged_dm.update(config.get("docmost", {}))
     config["docmost"] = merged_dm
+    merged_gm = DEFAULT_CONFIG["gmail_oauth"].copy()
+    merged_gm.update(config.get("gmail_oauth", {}))
+    config["gmail_oauth"] = merged_gm
     return config
 
 

@@ -235,6 +235,10 @@ def update_config(new_config: dict):
     if new_config.get("docmost", {}).get("db_password", "").startswith("•"):
         new_config.setdefault("docmost", {})["db_password"] = \
             current.get("docmost", {}).get("db_password", "")
+    # Preserve entire docmost config if all fields came in blank (accidental wipe protection)
+    dm_new = new_config.get("docmost", {})
+    if not any([dm_new.get("db_host"), dm_new.get("db_password"), dm_new.get("space_id")]):
+        new_config["docmost"] = current.get("docmost", dm_new)
     save_config(new_config)
     try:
         interval = int(new_config.get("email", {}).get("check_interval_minutes", 5))

@@ -13,7 +13,7 @@ logger = logging.getLogger("rabbithole.docmost")
 
 def _nanoid(size=21) -> str:
     """Generate a DocMost-style slug ID."""
-    alphabet = string.ascii_letters + string.digits + "-_"
+    alphabet = string.ascii_letters + string.digits
     return "".join(random.choices(alphabet, k=size))
 
 

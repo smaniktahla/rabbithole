@@ -3,12 +3,15 @@ import json
 import logging
 import base64
 import re
+import hashlib
+import secrets
 from typing import Optional
 
 logger = logging.getLogger("rabbithole.gmail_oauth")
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 TOKEN_PATH = "/app/data/gmail_token.json"
+STATE_PATH = "/app/data/oauth_state.json"
 _REDIRECT_URI = "http://localhost"
 
 
@@ -56,9 +59,26 @@ def _make_flow(client_id: str, client_secret: str):
     )
 
 
+def _pkce_pair():
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+    challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(verifier.encode()).digest()
+    ).rstrip(b"=").decode()
+    return verifier, challenge
+
+
 def get_auth_url(client_id: str, client_secret: str) -> str:
     flow = _make_flow(client_id, client_secret)
-    url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+    verifier, challenge = _pkce_pair()
+    os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+    with open(STATE_PATH, "w") as f:
+        json.dump({"code_verifier": verifier}, f)
+    url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        code_challenge=challenge,
+        code_challenge_method="S256",
+    )
     return url
 
 
@@ -70,8 +90,15 @@ def exchange_code(client_id: str, client_secret: str, code_or_url: str) -> None:
         code = m.group(1)
     else:
         code = code_or_url.strip()
+
+    verifier = None
+    if os.path.exists(STATE_PATH):
+        with open(STATE_PATH) as f:
+            verifier = json.load(f).get("code_verifier")
+        os.remove(STATE_PATH)
+
     flow = _make_flow(client_id, client_secret)
-    flow.fetch_token(code=code)
+    flow.fetch_token(code=code, code_verifier=verifier)
     _save_creds(flow.credentials)
 
 

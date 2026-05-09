@@ -794,12 +794,14 @@ async function saveSettings(){
                   client_secret:document.getElementById('c-gm-secret').value }
   };
   try {
-    await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nc)});
+    const r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nc)});
+    if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.detail||'Server error '+r.status); }
     cfg = nc; fillAreaDropdowns();
     const ok = document.getElementById('save-ok');
     ok.className='save-ok show'; setTimeout(()=>ok.className='save-ok',2800);
     toast('Settings saved ✓','ok');
-  } catch(e){ toast('Save failed: '+e.message,'err'); }
+    refreshOAuthStatus();
+  } catch(e){ toast('Save failed: '+e.message,'err'); console.error('saveSettings error:',e); }
 }
 
 /* ── Gmail OAuth ──────────────────────────────────────────────────────────── */

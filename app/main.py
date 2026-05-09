@@ -232,13 +232,12 @@ def update_config(new_config: dict):
             current.get("email", {}).get("app_password", "")
     if new_config.get("anthropic_api_key", "").startswith("sk-ant-..."):
         new_config["anthropic_api_key"] = current.get("anthropic_api_key", "")
-    if new_config.get("docmost", {}).get("db_password", "").startswith("•"):
-        new_config.setdefault("docmost", {})["db_password"] = \
-            current.get("docmost", {}).get("db_password", "")
-    # Preserve entire docmost config if all fields came in blank (accidental wipe protection)
-    dm_new = new_config.get("docmost", {})
-    if not any([dm_new.get("db_host"), dm_new.get("db_password"), dm_new.get("space_id")]):
-        new_config["docmost"] = current.get("docmost", dm_new)
+    # Preserve docmost password if incoming is masked or empty (fields were collapsed/hidden)
+    incoming_pw = new_config.get("docmost", {}).get("db_password", "")
+    if not incoming_pw or incoming_pw.startswith("•"):
+        saved_pw = current.get("docmost", {}).get("db_password", "")
+        if saved_pw:
+            new_config.setdefault("docmost", {})["db_password"] = saved_pw
     save_config(new_config)
     try:
         interval = int(new_config.get("email", {}).get("check_interval_minutes", 5))

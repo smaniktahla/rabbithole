@@ -598,7 +598,7 @@ async function loadRecent() {
 function itemCard(item) {
   const tags = Array.isArray(item.tags)?item.tags:[];
   const statusMsg = item.status_message ? `<div class="status-msg">⚙ ${item.status_message}</div>` : '';
-  const errMsg = item.error_message ? `<div class="status-msg err">✕ ${item.error_message}</div>` : '';
+  const errMsg = item.error_message ? `<div class="status-msg err" style="display:flex;align-items:center;gap:8px">✕ ${item.error_message} <button onclick="event.stopPropagation();retryItem(${item.id})" style="font-family:var(--ff-mono);font-size:10px;padding:2px 8px;border-radius:4px;background:var(--blue-dim);color:var(--blue);border:1px solid rgba(79,195,247,.2);cursor:pointer">retry</button></div>` : '';
   return `<div class="item-card" onclick="openModal(${item.id})">
     ${dot(item.status)}
     <div class="item-body">
@@ -687,6 +687,7 @@ async function openModal(id) {
       (item.docmost_page_id
         ? `<span class="btn-sm btn-blue" style="cursor:default;opacity:.65">DocMost ✓</span>`
         : (item.file_path ? `<button class="btn-sm btn-blue" onclick="syncDocmost(${item.id})">Sync to DocMost</button>` : '')) +
+      (item.status === 'error' ? `<button class="btn-sm btn-blue" onclick="retryItem(${item.id})">Retry</button>` : '') +
       `<button class="btn-sm btn-red" onclick="delItem(${item.id})">Remove</button>`;
 
     document.getElementById('overlay').classList.add('open');
@@ -879,6 +880,16 @@ async function disconnectGmail() {
 }
 
 function checkOAuthParam() {}
+
+async function retryItem(id) {
+  try {
+    const r = await fetch(`/api/library/${id}/retry`, {method: 'POST'});
+    if (!r.ok) { const d = await r.json(); toast(d.detail || 'Retry failed', 'err'); return; }
+    toast('Re-queued ✓', 'ok');
+    closeModal();
+    loadStats(); loadRecent();
+  } catch(e) { toast('Retry failed: ' + e.message, 'err'); }
+}
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 async function init(){

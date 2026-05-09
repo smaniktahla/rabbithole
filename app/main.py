@@ -164,6 +164,17 @@ def get_item(item_id: int):
     return item
 
 
+@app.post("/api/library/{item_id}/retry")
+def retry_item(item_id: int):
+    item = db.get_item(item_id)
+    if not item:
+        raise HTTPException(404, "Not found")
+    if item["status"] != "error":
+        raise HTTPException(400, "Item is not in error state")
+    db.update_item(item_id, status="queued", error_message=None, status_message=None)
+    return {"ok": True}
+
+
 @app.delete("/api/library/{item_id}")
 def delete_item(item_id: int):
     db.delete_item(item_id)

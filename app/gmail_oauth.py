@@ -2,13 +2,14 @@ import os
 import json
 import logging
 import base64
+import re
 from typing import Optional
 
-logger = logging.getLogger(rabbithole.gmail_oauth)
+logger = logging.getLogger("rabbithole.gmail_oauth")
 
-SCOPES = [https://www.googleapis.com/auth/gmail.modify]
-TOKEN_PATH = /app/data/gmail_token.json
-_REDIRECT_URI = http://localhost
+SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+TOKEN_PATH = "/app/data/gmail_token.json"
+_REDIRECT_URI = "http://localhost"
 
 
 def _load_creds():
@@ -62,8 +63,6 @@ def get_auth_url(client_id: str, client_secret: str) -> str:
 
 
 def exchange_code(client_id: str, client_secret: str, code_or_url: str) -> None:
-    """Accept either the full redirect URL or just the bare code string."""
-    import re
     if code_or_url.startswith("http"):
         m = re.search(r"[?&]code=([^&]+)", code_or_url)
         if not m:
@@ -111,7 +110,7 @@ def check_email_oauth() -> int:
             headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
             subject = headers.get("Subject", "")
             body = _extract_body(msg["payload"])
-            full_text = f"{subject}\n{body}"
+            full_text = subject + "\n" + body
 
             urls = extract_youtube_urls(full_text)
             override = parse_subject_override(subject)
@@ -119,7 +118,7 @@ def check_email_oauth() -> int:
             for url in urls:
                 item_id = db.add_item(url, source="email", subject_area_override=override)
                 if item_id > 0:
-                    logger.info(f"Queued from Gmail: {url} (area: {override})")
+                    logger.info("Queued from Gmail: %s (area: %s)", url, override)
                     queued += 1
 
             service.users().messages().modify(
@@ -128,7 +127,7 @@ def check_email_oauth() -> int:
             ).execute()
 
         except Exception as e:
-            logger.error(f"Error processing Gmail message {stub['id']}: {e}")
+            logger.error("Error processing Gmail message %s: %s", stub.get("id"), e)
 
     return queued
 

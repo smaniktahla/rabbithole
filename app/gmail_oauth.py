@@ -120,7 +120,7 @@ def check_email_oauth() -> int:
 
     service = build("gmail", "v1", credentials=creds)
     results = service.users().messages().list(
-        userId="me", q="is:unread", maxResults=20
+        userId="me", q="is:unread subject:[RH]", maxResults=20
     ).execute()
 
     messages = results.get("messages", [])

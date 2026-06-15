@@ -100,6 +100,8 @@ def classify_and_parse(
 
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
+    # Strip control characters that Gemma4 sometimes emits inside strings
+    raw = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", raw)
 
     result = json.loads(raw)
 

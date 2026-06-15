@@ -3,7 +3,6 @@ import logging
 import re
 from typing import Dict, Optional
 
-import anthropic
 from config_manager import load_config
 from transcriber import truncate_transcript
 
@@ -41,6 +40,37 @@ Rules:
 """
 
 
+def _call_local(prompt: str, config: dict) -> str:
+    from openai import OpenAI
+    url = config.get("local_llm_url", "http://10.10.10.226:8080")
+    model = config.get("local_llm_model", "gemma4:12b")
+    client = OpenAI(base_url=f"{url.rstrip('/')}/v1", api_key="none")
+    response = client.chat.completions.create(
+        model=model,
+        max_tokens=4096,
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": prompt},
+        ]
+    )
+    return response.choices[0].message.content.strip()
+
+
+def _call_anthropic(prompt: str, config: dict) -> str:
+    import anthropic
+    api_key = config.get("anthropic_api_key", "")
+    if not api_key:
+        raise ValueError("Anthropic API key not configured — set it in Settings.")
+    client = anthropic.Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=4096,
+        system=_SYSTEM,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.content[0].text.strip()
+
+
 def classify_and_parse(
     url: str,
     title: str,
@@ -49,9 +79,6 @@ def classify_and_parse(
     subject_area_override: Optional[str] = None
 ) -> Dict:
     config = load_config()
-    api_key = config.get("anthropic_api_key", "")
-    if not api_key:
-        raise ValueError("Anthropic API key not configured — set it in Settings.")
 
     subject_areas = [sa["name"] for sa in config.get("subject_areas", [])]
     if not subject_areas:
@@ -65,25 +92,20 @@ def classify_and_parse(
         transcript=truncate_transcript(transcript)
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2000,
-        system=_SYSTEM,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    provider = config.get("llm_provider", "local")
+    if provider == "anthropic":
+        raw = _call_anthropic(prompt, config)
+    else:
+        raw = _call_local(prompt, config)
 
-    raw = response.content[0].text.strip()
     raw = re.sub(r"^```(?:json)?\s*", "", raw)
     raw = re.sub(r"\s*```$", "", raw)
 
     result = json.loads(raw)
 
-    # Subject-line email override takes precedence
     if subject_area_override and subject_area_override in subject_areas:
         result["subject_area"] = subject_area_override
 
-    # Validate
     if result.get("subject_area") not in set(subject_areas) | {"misc"}:
         result["subject_area"] = subject_areas[0] if subject_areas else "misc"
 

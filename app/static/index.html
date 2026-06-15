@@ -414,7 +414,20 @@
 
       <div class="settings-card">
         <div class="sc-title">🔑 API & Storage</div>
-        <div class="form-row"><label class="form-label">Anthropic API Key</label><input class="form-input" id="c-apikey" type="password" placeholder="sk-ant-..." /></div>
+        <div class="form-row">
+          <label class="form-label">LLM Provider</label>
+          <select class="form-input" id="c-provider" onchange="toggleProvider()">
+            <option value="local">Local (llama.cpp / Ollama)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+          </select>
+        </div>
+        <div id="local-fields">
+          <div class="form-row"><label class="form-label">Local LLM URL</label><input class="form-input" id="c-local-url" placeholder="http://10.10.10.226:8080" /></div>
+          <div class="form-row"><label class="form-label">Local LLM Model</label><input class="form-input" id="c-local-model" placeholder="gemma4:12b" /></div>
+        </div>
+        <div id="anthropic-fields" style="display:none">
+          <div class="form-row"><label class="form-label">Anthropic API Key</label><input class="form-input" id="c-apikey" type="password" placeholder="sk-ant-..." /></div>
+        </div>
         <div class="form-row"><label class="form-label">Default Storage Path</label><input class="form-input" id="c-defpath" placeholder="/mnt/documents/RabbitHole" /></div>
         <div class="form-row"><label class="form-label">Default Subject Area (fallback)</label><input class="form-input" id="c-defarea" placeholder="misc" /></div>
       </div>
@@ -481,6 +494,8 @@
     <div id="m-badges" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px"></div>
     <div class="modal-section">Summary</div>
     <div class="modal-summary" id="m-summary"></div>
+    <div class="modal-section" id="m-tags-label" style="display:none">Tags</div>
+    <div class="tags-row" id="m-tags" style="margin-bottom:4px"></div>
     <div class="modal-section" id="m-kp-label" style="display:none">Key Points</div>
     <ul class="modal-points" id="m-kp"></ul>
     <div class="modal-section">File on Disk</div>
@@ -676,10 +691,8 @@ async function openModal(id) {
     kpEl.innerHTML = '';
     kpLabel.style.display = 'none';
 
-    if(tags.length){
-      document.getElementById('m-summary').insertAdjacentHTML('afterend',
-        `<div class="modal-section">Tags</div><div class="tags-row" style="margin-bottom:4px">${tagsHtml(tags)}</div>`);
-    }
+    document.getElementById('m-tags').innerHTML = tagsHtml(tags);
+    document.getElementById('m-tags-label').style.display = tags.length ? '' : 'none';
 
     document.getElementById('m-footer').innerHTML =
       `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on YouTube ↗</a>` +
@@ -723,9 +736,13 @@ async function loadSettings(){
     document.getElementById('c-email').value   = cfg.email?.email_address||'';
     document.getElementById('c-pass').value    = cfg.email?.app_password||'';
     document.getElementById('c-interval').value= cfg.email?.check_interval_minutes||5;
-    document.getElementById('c-apikey').value  = cfg.anthropic_api_key||'';
-    document.getElementById('c-defpath').value = cfg.default_storage_path||'';
-    document.getElementById('c-defarea').value = cfg.default_subject_area||'misc';
+    document.getElementById('c-provider').value   = cfg.llm_provider||'local';
+    document.getElementById('c-local-url').value  = cfg.local_llm_url||'http://10.10.10.226:8080';
+    document.getElementById('c-local-model').value= cfg.local_llm_model||'gemma4:12b';
+    document.getElementById('c-apikey').value     = cfg.anthropic_api_key||'';
+    document.getElementById('c-defpath').value    = cfg.default_storage_path||'';
+    document.getElementById('c-defarea').value    = cfg.default_subject_area||'misc';
+    toggleProvider();
     document.getElementById('c-dm-on').checked = cfg.docmost?.enabled||false;
     document.getElementById('c-dm-url').value  = cfg.docmost?.db_host||'';
     document.getElementById('c-dm-tok').value  = cfg.docmost?.db_password||'';
@@ -735,6 +752,12 @@ async function loadSettings(){
     toggleDM(); renderSA(cfg.subject_areas||[]);
     refreshOAuthStatus();
   } catch(e){ console.error(e); }
+}
+
+function toggleProvider(){
+  const isLocal = document.getElementById('c-provider').value === 'local';
+  document.getElementById('local-fields').style.display = isLocal ? '' : 'none';
+  document.getElementById('anthropic-fields').style.display = isLocal ? 'none' : '';
 }
 
 function toggleDM(){
@@ -783,6 +806,9 @@ async function saveSettings(){
              email_address:cfg.email?.email_address||'',
              app_password:cfg.email?.app_password||'',
              check_interval_minutes:parseInt(document.getElementById('c-interval').value)||5 },
+    llm_provider:document.getElementById('c-provider').value,
+    local_llm_url:document.getElementById('c-local-url').value.trim(),
+    local_llm_model:document.getElementById('c-local-model').value.trim(),
     anthropic_api_key:document.getElementById('c-apikey').value.trim(),
     default_storage_path:document.getElementById('c-defpath').value.trim()||'/mnt/documents/RabbitHole',
     default_subject_area:document.getElementById('c-defarea').value.trim()||'misc',

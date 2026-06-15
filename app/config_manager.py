@@ -13,6 +13,9 @@ DEFAULT_CONFIG = {
         "check_interval_minutes": 5
     },
     "anthropic_api_key": "",
+    "llm_provider": "local",
+    "local_llm_url": "http://10.10.10.226:8080",
+    "local_llm_model": "gemma4:12b",
     "subject_areas": [],
     "docmost": {
         "enabled": False,

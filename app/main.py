@@ -50,7 +50,7 @@ def process_queue():
 
             db.update_item(item_id,
                            title=title, channel=channel,
-                           status_message=f"Transcript fetched ({len(transcript):,} chars) — sending to claude-haiku-4-5...")
+                           status_message=f"Transcript fetched ({len(transcript):,} chars) — sending to LLM...")
 
             parsed = classify_and_parse(
                 url=url,

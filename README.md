@@ -1,6 +1,7 @@
 # 🐇 RabbitHole
 
-A self-hosted YouTube knowledge capture tool. Drop a link (or forward an email), get a structured summary, key points, and tags — saved to markdown on disk and optionally synced to [DocMost](https://docmost.com).
+A self-hosted YouTube knowledge capture tool. Drop a link (or forward an email), get a structured summary, key points, and tags — saved to markdown on disk and optionally synced to [DocMost](https://docmost.com) (DocMost sync requires some custom code). Great for ingesting info from YouTube to use for AI RAG or just adding to your own notes without having to watch an entire video. Let the AI take the notes for you!
+<img width="1577" height="1181" alt="image" src="https://github.com/user-attachments/assets/6996d036-12c5-4891-a928-05ce2528b818" />
 
 ## What it does
 
@@ -9,6 +10,7 @@ A self-hosted YouTube knowledge capture tool. Drop a link (or forward an email),
 - **Classifies** each item into a primary category, writes structured markdown to disk, and generates searchable tags
 - **Syncs to DocMost** — optionally pushes each note into a DocMost wiki space via direct Postgres
 - **Library view** — search, filter by category, reclassify items, edit tags, and bulk-update multiple items at once
+<img width="1560" height="1182" alt="image" src="https://github.com/user-attachments/assets/00b8129e-f545-482d-a835-98b0c55a8649" />
 
 ## Stack
 

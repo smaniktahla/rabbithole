@@ -227,6 +227,79 @@
     .load-more { width: 100%; padding: 11px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-family: var(--ff-mono); font-size: 11px; cursor: pointer; margin-top: 10px; transition: background .15s; }
     .load-more:hover { background: rgba(20,28,40,.85); color: var(--text-dim); }
 
+    /* ── Bulk select ─── */
+    .lib-card { position: relative; }
+    .card-checkbox {
+      position: absolute; top: 50%; left: 14px; transform: translateY(-50%);
+      width: 16px; height: 16px; cursor: pointer;
+      accent-color: var(--amber);
+    }
+    .lib-card { padding-left: 42px; }
+    .lib-card.selected { border-color: var(--amber); background: rgba(232,168,71,.05); }
+
+    .bulk-bar {
+      position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+      background: var(--surface); border: 1px solid var(--border-l);
+      border-radius: 12px; padding: 12px 18px;
+      display: none; align-items: center; gap: 10px; z-index: 300;
+      box-shadow: 0 8px 32px rgba(0,0,0,.5);
+      font-family: var(--ff-mono); font-size: 11px;
+    }
+    .bulk-bar.open { display: flex; }
+    .bulk-count { color: var(--amber); font-weight: 600; white-space: nowrap; }
+    .bulk-sep { width: 1px; height: 20px; background: var(--border-l); }
+    .bulk-area-sel {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px;
+      color: var(--text); font-family: var(--ff-mono); font-size: 11px;
+      outline: none; cursor: pointer; min-width: 130px;
+    }
+    .bulk-tag-in {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px;
+      color: var(--text); font-family: var(--ff-mono); font-size: 11px;
+      outline: none; width: 120px;
+    }
+    .bulk-tag-in::placeholder { color: var(--text-muted); }
+    .bulk-tag-in:focus, .bulk-area-sel:focus { border-color: var(--amber); }
+    .bulk-apply { font-family: var(--ff-head); font-size: 12px; font-weight: 700; padding: 7px 15px; background: var(--amber); color: #08090d; border: none; border-radius: 6px; cursor: pointer; transition: background .15s; white-space: nowrap; }
+    .bulk-apply:hover { background: var(--amber-h); }
+    .bulk-cancel { font-family: var(--ff-mono); font-size: 11px; padding: 7px 12px; background: var(--border); border: 1px solid var(--border-l); border-radius: 6px; color: var(--text-muted); cursor: pointer; transition: background .15s; }
+    .bulk-cancel:hover { background: var(--border-l); color: var(--text); }
+
+    /* ── Editable tags in modal ─── */
+    .tag-editable {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-family: var(--ff-mono); font-size: 10px;
+      padding: 1px 7px; border-radius: 3px;
+      background: var(--border); color: var(--text-muted);
+    }
+    .tag-rm { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px; line-height: 1; padding: 0 0 0 2px; display: none; }
+    .tag-rm:hover { color: var(--red); }
+    .tags-edit-mode .tag-rm { display: inline; }
+    .tag-add-in {
+      font-family: var(--ff-mono); font-size: 10px;
+      background: var(--bg); border: 1px dashed var(--border-l);
+      border-radius: 3px; padding: 1px 7px; color: var(--text);
+      outline: none; width: 90px; display: none;
+    }
+    .tag-add-in::placeholder { color: var(--text-muted); }
+    .tag-add-in:focus { border-color: var(--amber); }
+    .tags-edit-mode .tag-add-in { display: inline-block; }
+    .modal-edit-row { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; }
+    .modal-area-sel {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 6px 10px;
+      color: var(--text); font-family: var(--ff-mono); font-size: 11px;
+      outline: none; cursor: pointer; flex: 1;
+    }
+    .modal-area-sel:focus { border-color: var(--amber); }
+    .modal-save-btn { font-family: var(--ff-head); font-size: 12px; font-weight: 700; padding: 7px 14px; background: var(--amber); color: #08090d; border: none; border-radius: 6px; cursor: pointer; display: none; }
+    .modal-save-btn:hover { background: var(--amber-h); }
+    .modal-save-btn.dirty { display: inline-block; }
+    .edit-toggle { font-family: var(--ff-mono); font-size: 10px; padding: 3px 9px; background: var(--border); border: 1px solid var(--border-l); border-radius: 5px; color: var(--text-muted); cursor: pointer; transition: background .15s; }
+    .edit-toggle:hover { background: var(--border-l); color: var(--text); }
+
     /* ── Modal ─── */
     .overlay {
       display: none; position: fixed; inset: 0;
@@ -356,7 +429,7 @@
             <button id="submit-btn" class="submit-btn" onclick="submitUrl()">Queue →</button>
           </div>
           <select id="area-cap" class="area-select">
-            <option value="">Auto-classify subject area</option>
+            <option value="">Auto-classify primary category</option>
           </select>
         </div>
 
@@ -392,6 +465,18 @@
     </div>
     <div id="lib-list"></div>
     <button class="load-more" id="load-more" onclick="loadLibrary(false)" style="display:none">Load more</button>
+  </div>
+
+  <!-- Bulk action bar -->
+  <datalist id="area-suggestions"></datalist>
+  <div class="bulk-bar" id="bulk-bar">
+    <span class="bulk-count" id="bulk-count">0 selected</span>
+    <div class="bulk-sep"></div>
+    <input class="bulk-area-sel" id="bulk-area" list="area-suggestions" placeholder="primary category…" autocomplete="off" />
+    <div class="bulk-sep"></div>
+    <input class="bulk-tag-in" id="bulk-tag-in" placeholder="new tag to add…" />
+    <button class="bulk-apply" onclick="applyBulk()">Apply to selected</button>
+    <button class="bulk-cancel" onclick="clearSelection()">Clear</button>
   </div>
 
   <!-- ── SETTINGS ──────────────────────────────────────────────────────────── -->
@@ -433,12 +518,12 @@
       </div>
 
       <div class="settings-card wide">
-        <div class="sc-title">🗂 Subject Areas → Storage Paths</div>
+        <div class="sc-title">🗂 Primary Categories → Storage Paths</div>
         <table class="sa-table">
           <thead><tr><th style="width:32%">Name</th><th>Storage Path on Host</th><th style="width:36px"></th></tr></thead>
           <tbody id="sa-rows"></tbody>
         </table>
-        <button class="sa-add" onclick="addSA()">+ Add subject area</button>
+        <button class="sa-add" onclick="addSA()">+ Add primary category</button>
       </div>
 
       <div class="settings-card wide">
@@ -492,10 +577,18 @@
     <div class="modal-title" id="m-title"></div>
     <div class="modal-meta" id="m-meta"></div>
     <div id="m-badges" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px"></div>
+
+    <!-- Reclassify row -->
+    <div class="modal-edit-row">
+      <input class="modal-area-sel" id="m-area-sel" list="area-suggestions" placeholder="primary category…" autocomplete="off" oninput="markModalDirty()" />
+      <button class="edit-toggle" id="m-edit-toggle" onclick="toggleTagEdit()">Edit tags</button>
+      <button class="modal-save-btn" id="m-save-btn" onclick="saveModalChanges()">Save ✓</button>
+    </div>
+
     <div class="modal-section">Summary</div>
     <div class="modal-summary" id="m-summary"></div>
     <div class="modal-section" id="m-tags-label" style="display:none">Tags</div>
-    <div class="tags-row" id="m-tags" style="margin-bottom:4px"></div>
+    <div class="tags-row tags-edit-mode" id="m-tags" style="margin-bottom:4px;display:none"></div>
     <div class="modal-section" id="m-kp-label" style="display:none">Key Points</div>
     <ul class="modal-points" id="m-kp"></ul>
     <div class="modal-section">File on Disk</div>
@@ -510,6 +603,11 @@
 let cfg = {};
 let libOffset = 0;
 let searchTimer = null;
+let selectedIds = new Set();
+let modalItem = null;
+let modalDirty = false;
+let tagEditMode = false;
+let knownAreas = [];   // union of config + db subject areas
 
 /* ── Tab nav ──────────────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-tab').forEach(t => t.addEventListener('click', () => {
@@ -585,16 +683,26 @@ async function loadStats() {
         <span class="bar-count">${a.count}</span>
       </div>`).join('');
 
+    // Build known areas = union of DB areas + configured areas
+    const dbAreas = (st.by_subject_area||[]).map(a=>a.subject_area).filter(Boolean);
+    const cfgAreas = (cfg.subject_areas||[]).map(a=>a.name).filter(Boolean);
+    knownAreas = [...new Set([...dbAreas, ...cfgAreas])].sort();
     fillAreaDropdowns();
   } catch(e){ console.error(e); }
 }
 
 function fillAreaDropdowns() {
-  const opts = (cfg.subject_areas||[]).map(a=>`<option value="${a.name}">${a.name}</option>`).join('');
-  document.getElementById('area-cap').innerHTML    = '<option value="">Auto-classify subject area</option>' + opts;
+  const opts = knownAreas.map(a=>`<option value="${a}"></option>`).join('');
+  // datalist for free-text inputs
+  const dl = document.getElementById('area-suggestions');
+  if (dl) dl.innerHTML = opts;
+  // capture tab select
+  const capOpts = knownAreas.map(a=>`<option value="${a}">${a}</option>`).join('');
+  document.getElementById('area-cap').innerHTML = '<option value="">Auto-classify subject area</option>' + capOpts;
+  // library filter select
   const af = document.getElementById('area-filter');
   const cur = af.value;
-  af.innerHTML = '<option value="">All areas</option>' + opts;
+  af.innerHTML = '<option value="">All areas</option>' + capOpts;
   af.value = cur;
 }
 
@@ -654,14 +762,18 @@ async function loadLibrary(reset=true) {
     }
     document.getElementById('lib-list').innerHTML += items.map(item=>{
       const tags = Array.isArray(item.tags)?item.tags:[];
-      return `<div class="lib-card" onclick="openModal(${item.id})">
-        <div class="lib-header">
-          <div class="lib-title">${item.title||item.url}</div>
-          <div class="lib-badges">${areaBadge(item.subject_area)} ${srcBadge(item.source)}</div>
+      const sel = selectedIds.has(item.id) ? 'selected' : '';
+      return `<div class="lib-card ${sel}" id="lc-${item.id}">
+        <input type="checkbox" class="card-checkbox" id="chk-${item.id}" ${sel?'checked':''} onchange="toggleSelect(${item.id})" />
+        <div onclick="openModal(${item.id})" style="cursor:pointer">
+          <div class="lib-header">
+            <div class="lib-title">${item.title||item.url}</div>
+            <div class="lib-badges">${areaBadge(item.subject_area)} ${srcBadge(item.source)}</div>
+          </div>
+          <div class="lib-meta">${item.channel?item.channel+' · ':''}${ago(item.processed_at)}</div>
+          ${item.summary?`<div class="lib-summary">${item.summary}</div>`:''}
+          ${tags.length?`<div class="tags-row">${tagsHtml(tags)}</div>`:''}
         </div>
-        <div class="lib-meta">${item.channel?item.channel+' · ':''}${ago(item.processed_at)}</div>
-        ${item.summary?`<div class="lib-summary">${item.summary}</div>`:''}
-        ${tags.length?`<div class="tags-row">${tagsHtml(tags)}</div>`:''}
       </div>`;
     }).join('');
     libOffset += items.length;
@@ -675,7 +787,11 @@ function debouncedSearch(){ clearTimeout(searchTimer); searchTimer=setTimeout(()
 async function openModal(id) {
   try {
     const item = await fetch('/api/library/'+id).then(r=>r.json());
-    const tags  = Array.isArray(item.tags)?item.tags:[];
+    modalItem = item;
+    modalDirty = false;
+    tagEditMode = false;
+
+    const tags = Array.isArray(item.tags)?item.tags:[];
     document.getElementById('m-title').textContent = item.title||item.url;
     document.getElementById('m-meta').innerHTML =
       (item.channel?`<span>📺 ${item.channel}</span>`:'') +
@@ -685,14 +801,21 @@ async function openModal(id) {
     document.getElementById('m-summary').textContent = item.summary||'No summary available.';
     document.getElementById('m-path').textContent = item.file_path||'Not yet written to disk';
 
-    // Key points from full item — summary only stored; show tags
-    const kpLabel = document.getElementById('m-kp-label');
-    const kpEl    = document.getElementById('m-kp');
-    kpEl.innerHTML = '';
-    kpLabel.style.display = 'none';
+    document.getElementById('m-kp-label').style.display = 'none';
+    document.getElementById('m-kp').innerHTML = '';
 
-    document.getElementById('m-tags').innerHTML = tagsHtml(tags);
+    fillAreaDropdowns();
+    document.getElementById('m-area-sel').value = item.subject_area || '';
+
+    // Render editable tags (hidden until edit mode toggled)
+    renderModalTags(tags);
     document.getElementById('m-tags-label').style.display = tags.length ? '' : 'none';
+    document.getElementById('m-tags').style.display = tags.length ? 'flex' : 'none';
+
+    // Reset edit toggle & save button
+    const tog = document.getElementById('m-edit-toggle');
+    tog.textContent = 'Edit tags';
+    document.getElementById('m-save-btn').classList.remove('dirty');
 
     document.getElementById('m-footer').innerHTML =
       `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on YouTube ↗</a>` +
@@ -707,8 +830,139 @@ async function openModal(id) {
   } catch(e){ toast('Could not load item','err'); }
 }
 
+function renderModalTags(tags) {
+  const row = document.getElementById('m-tags');
+  const tagNodes = tags.map(t=>`
+    <span class="tag-editable">
+      ${t}<button class="tag-rm" title="Remove tag" onclick="removeModalTag('${t}')">×</button>
+    </span>`).join('');
+  row.innerHTML = tagNodes + `<input class="tag-add-in" id="tag-add-in" placeholder="new tag…" onkeydown="addModalTagKey(event)" />`;
+}
+
+function getModalTags() {
+  return Array.from(document.querySelectorAll('#m-tags .tag-editable')).map(el=>el.childNodes[0].textContent.trim());
+}
+
+function removeModalTag(tag) {
+  const current = getModalTags().filter(t=>t!==tag);
+  renderModalTags(current);
+  markModalDirty();
+}
+
+function addModalTagKey(e) {
+  if (e.key !== 'Enter' && e.key !== ',') return;
+  e.preventDefault();
+  const val = e.target.value.trim().toLowerCase().replace(/\s+/g,'-');
+  if (!val) return;
+  const current = getModalTags();
+  if (!current.includes(val)) {
+    renderModalTags([...current, val]);
+    markModalDirty();
+  } else {
+    e.target.value = '';
+  }
+}
+
+function toggleTagEdit() {
+  tagEditMode = !tagEditMode;
+  const row = document.getElementById('m-tags');
+  const tog = document.getElementById('m-edit-toggle');
+  if (tagEditMode) {
+    row.classList.add('tags-edit-mode');
+    row.style.display = 'flex';
+    document.getElementById('m-tags-label').style.display = '';
+    tog.textContent = 'Done editing';
+  } else {
+    row.classList.remove('tags-edit-mode');
+    tog.textContent = 'Edit tags';
+  }
+}
+
+function markModalDirty() {
+  modalDirty = true;
+  document.getElementById('m-save-btn').classList.add('dirty');
+}
+
+async function saveModalChanges() {
+  if (!modalItem) return;
+  const subject_area = document.getElementById('m-area-sel').value || null;
+  const tags = getModalTags();
+  try {
+    const r = await fetch(`/api/library/${modalItem.id}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({subject_area, tags})
+    });
+    if (!r.ok) { const d = await r.json(); throw new Error(d.detail||'Save failed'); }
+    toast('Saved ✓', 'ok');
+    modalDirty = false;
+    document.getElementById('m-save-btn').classList.remove('dirty');
+    // Refresh badges
+    document.getElementById('m-badges').innerHTML = areaBadge(subject_area)+' '+srcBadge(modalItem.source);
+    if (document.getElementById('tab-library').classList.contains('active')) loadLibrary(true);
+  } catch(e) { toast(e.message, 'err'); }
+}
+
 function closeModal() { document.getElementById('overlay').classList.remove('open'); }
 function closeOverlay(e){ if(e.target.id==='overlay') closeModal(); }
+
+/* ── Bulk select ──────────────────────────────────────────────────────────── */
+function toggleSelect(id) {
+  const card = document.getElementById('lc-'+id);
+  const chk  = document.getElementById('chk-'+id);
+  if (selectedIds.has(id)) {
+    selectedIds.delete(id);
+    card.classList.remove('selected');
+  } else {
+    selectedIds.add(id);
+    card.classList.add('selected');
+  }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const n = selectedIds.size;
+  document.getElementById('bulk-count').textContent = n + ' selected';
+  document.getElementById('bulk-bar').className = 'bulk-bar' + (n > 0 ? ' open' : '');
+  if (n > 0) fillAreaDropdowns();
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll('.lib-card.selected').forEach(c=>c.classList.remove('selected'));
+  document.querySelectorAll('.card-checkbox').forEach(c=>c.checked=false);
+  document.getElementById('bulk-bar').className = 'bulk-bar';
+  document.getElementById('bulk-tag-in').value = '';
+  document.getElementById('bulk-area').value = '';
+}
+
+async function applyBulk() {
+  if (!selectedIds.size) { toast('Select at least one item', 'err'); return; }
+  const area = document.getElementById('bulk-area').value || null;
+  const tagRaw = document.getElementById('bulk-tag-in').value.trim().toLowerCase().replace(/\s+/g,'-');
+
+  if (!area && !tagRaw) { toast('Choose an area or enter a tag to add', 'err'); return; }
+
+  const ids = [...selectedIds];
+  let done = 0;
+  for (const id of ids) {
+    try {
+      // Fetch current item to merge tags
+      const item = await fetch('/api/library/'+id).then(r=>r.json());
+      const currentTags = Array.isArray(item.tags)?item.tags:[];
+      const newTags = tagRaw && !currentTags.includes(tagRaw) ? [...currentTags, tagRaw] : currentTags;
+      const body = {};
+      if (area) body.subject_area = area;
+      if (tagRaw) body.tags = newTags;
+      await fetch('/api/library/'+id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+      done++;
+    } catch(e) { console.error(e); }
+  }
+  toast(`Updated ${done} item(s) ✓`, 'ok');
+  clearSelection();
+  loadLibrary(true);
+  loadStats();
+}
 
 async function syncDocmost(id){
   try {
@@ -731,24 +985,25 @@ async function delItem(id){
 /* ── Settings ─────────────────────────────────────────────────────────────── */
 async function loadSettings(){
   try {
-    cfg = await fetch('/api/config').then(r=>r.json());
-    document.getElementById('c-imap').value    = cfg.email?.imap_server||'';
-    document.getElementById('c-email').value   = cfg.email?.email_address||'';
-    document.getElementById('c-pass').value    = cfg.email?.app_password||'';
-    document.getElementById('c-interval').value= cfg.email?.check_interval_minutes||5;
-    document.getElementById('c-provider').value   = cfg.llm_provider||'local';
-    document.getElementById('c-local-url').value  = cfg.local_llm_url||'http://10.10.10.226:8080';
-    document.getElementById('c-local-model').value= cfg.local_llm_model||'gemma4:12b';
-    document.getElementById('c-apikey').value     = cfg.anthropic_api_key||'';
-    document.getElementById('c-defpath').value    = cfg.default_storage_path||'';
-    document.getElementById('c-defarea').value    = cfg.default_subject_area||'misc';
+    cfg = await fetch('/api/config', {cache:'no-store'}).then(r=>r.json());
+    const setVal = (id, val) => { const el = document.getElementById(id); if(el) el.value = val; };
+    setVal('c-imap',     cfg.email?.imap_server||'');
+    setVal('c-email',    cfg.email?.email_address||'');
+    setVal('c-pass',     cfg.email?.app_password||'');
+    setVal('c-interval', cfg.email?.check_interval_minutes||5);
+    setVal('c-provider', cfg.llm_provider||'local');
+    setVal('c-local-url',   cfg.local_llm_url||'http://10.10.10.226:8080');
+    setVal('c-local-model', cfg.local_llm_model||'gemma4:12b');
+    setVal('c-apikey',      cfg.anthropic_api_key||'');
+    setVal('c-defpath',     cfg.default_storage_path||'');
+    setVal('c-defarea',     cfg.default_subject_area||'misc');
     toggleProvider();
-    document.getElementById('c-dm-on').checked = cfg.docmost?.enabled||false;
-    document.getElementById('c-dm-url').value  = cfg.docmost?.db_host||'';
-    document.getElementById('c-dm-tok').value  = cfg.docmost?.db_password||'';
-    document.getElementById('c-dm-space').value= cfg.docmost?.space_id||'';
-    document.getElementById('c-gm-id').value    = cfg.gmail_oauth?.client_id||'';
-    document.getElementById('c-gm-secret').value= cfg.gmail_oauth?.client_secret||'';
+    const dmOn = document.getElementById('c-dm-on'); if(dmOn) dmOn.checked = cfg.docmost?.enabled||false;
+    setVal('c-dm-url',   cfg.docmost?.db_host||'');
+    setVal('c-dm-tok',   cfg.docmost?.db_password||'');
+    setVal('c-dm-space', cfg.docmost?.space_id||'');
+    setVal('c-gm-id',     cfg.gmail_oauth?.client_id||'');
+    setVal('c-gm-secret', cfg.gmail_oauth?.client_secret||'');
     toggleDM(); renderSA(cfg.subject_areas||[]);
     refreshOAuthStatus();
   } catch(e){ console.error(e); }
@@ -920,7 +1175,7 @@ async function retryItem(id) {
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 async function init(){
   checkOAuthParam();
-  try { cfg = await fetch('/api/config').then(r=>r.json()); } catch(_){}
+  try { cfg = await fetch('/api/config', {cache:'no-store'}).then(r=>r.json()); } catch(_){}
   fillAreaDropdowns();
   loadStats();
   loadRecent();

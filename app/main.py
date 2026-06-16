@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -244,6 +245,75 @@ def update_config(new_config: dict):
         scheduler.reschedule_job("email_check", trigger="interval", minutes=interval)
     except Exception as e:
         logger.warning(f"Could not reschedule email check: {e}")
+    return {"ok": True}
+
+
+class ReclassifyRequest(BaseModel):
+    subject_area: Optional[str] = None
+    tags: Optional[list] = None
+
+
+def _rewrite_markdown_metadata(filepath: str, subject_area: str = None, tags: list = None):
+    """Update subject_area and tags in a markdown file's frontmatter and ## Tags section."""
+    if not os.path.exists(filepath):
+        return
+    with open(filepath, encoding="utf-8") as f:
+        content = f.read()
+
+    # Rewrite frontmatter fields
+    if subject_area is not None:
+        content = re.sub(r"^subject_area:.*$", f"subject_area: {subject_area}", content, flags=re.MULTILINE)
+    if tags is not None:
+        tag_str = f"[{', '.join(tags)}]"
+        content = re.sub(r"^tags:.*$", f"tags: {tag_str}", content, flags=re.MULTILINE)
+        # Rewrite the ## Tags body section if present
+        new_tag_line = " ".join(f"`{t}`" for t in tags) if tags else ""
+        if re.search(r"^## Tags\s*$", content, flags=re.MULTILINE):
+            content = re.sub(
+                r"(^## Tags\s*\n\n?).*?(\n(?=##|\Z))",
+                lambda m: m.group(1) + new_tag_line + m.group(2),
+                content, flags=re.MULTILINE | re.DOTALL
+            )
+
+    with open(filepath, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+@app.patch("/api/library/{item_id}")
+def reclassify_item(item_id: int, req: ReclassifyRequest):
+    item = db.get_item(item_id)
+    if not item:
+        raise HTTPException(404, "Not found")
+
+    updates = {}
+    if req.subject_area is not None:
+        updates["subject_area"] = req.subject_area
+    if req.tags is not None:
+        updates["tags"] = json.dumps(req.tags)
+
+    if updates:
+        db.update_item(item_id, **updates)
+
+    if item.get("file_path") and os.path.exists(item["file_path"]):
+        _rewrite_markdown_metadata(
+            item["file_path"],
+            subject_area=req.subject_area,
+            tags=req.tags
+        )
+
+    # Re-sync to DocMost if already synced
+    if item.get("docmost_page_id") and item.get("file_path") and os.path.exists(item["file_path"]):
+        fp = item["file_path"]
+        if req.subject_area is not None or req.tags is not None:
+            _rewrite_markdown_metadata(fp, subject_area=req.subject_area, tags=req.tags)
+        with open(fp, encoding="utf-8") as f:
+            md_content = f.read()
+        area = req.subject_area if req.subject_area is not None else item.get("subject_area", "misc")
+        try:
+            upsert_page(item.get("title") or "Unknown", md_content, area)
+        except Exception as e:
+            logger.warning(f"DocMost re-sync skipped after reclassify: {e}")
+
     return {"ok": True}
 
 

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
+import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
@@ -29,6 +30,23 @@ logger = logging.getLogger("rabbithole")
 scheduler = BackgroundScheduler(timezone="America/New_York")
 last_email_check: dict = {"time": None, "queued": 0}
 
+ATQ_URL = os.environ.get("ATQ_URL", "http://10.10.10.226:8700")
+ATQ_NOTIFY_TARGET = os.environ.get("ATQ_NOTIFY_TARGET", "hermes-ai2")
+DOCMOST_URL = os.environ.get("DOCMOST_URL", "http://10.10.10.201:3121")
+
+
+def notify(message: str):
+    """Push a completion/error notification through ATQ's escalate_user
+    task type, which Hermes already polls and delivers over WhatsApp."""
+    try:
+        requests.post(f"{ATQ_URL}/tasks", json={
+            "type": "escalate_user",
+            "instructions": message,
+            "assigned_to": ATQ_NOTIFY_TARGET,
+        }, timeout=5)
+    except Exception as e:
+        logger.warning(f"ATQ notify failed: {e}")
+
 
 def process_queue():
     items = db.get_queued_items()
@@ -47,6 +65,7 @@ def process_queue():
                 db.update_item(item_id, status="error",
                                status_message=None,
                                error_message="Could not extract transcript or captions")
+                notify(f"🐰 RabbitHole failed: {url} — could not extract transcript or captions")
                 continue
 
             db.update_item(item_id,
@@ -90,11 +109,17 @@ def process_queue():
                 tags=json.dumps(parsed.get("tags", []))
             )
             logger.info(f"Done [{item_id}]: '{title}' -> {filepath}")
+            link = f"{DOCMOST_URL}/p/{docmost_id}" if docmost_id else None
+            msg = f"🐰 RabbitHole done: \"{title}\" [{parsed.get('subject_area', 'misc')}]"
+            if link:
+                msg += f"\n{link}"
+            notify(msg)
 
         except Exception as e:
             logger.error(f"Failed [{item_id}] {url}: {e}", exc_info=True)
             db.update_item(item_id, status="error", status_message=None,
                            error_message=str(e)[:500])
+            notify(f"🐰 RabbitHole failed: {url} — {str(e)[:200]}")
 
 
 def run_email_check():

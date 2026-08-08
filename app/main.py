@@ -156,7 +156,14 @@ class SubmitRequest(BaseModel):
 @app.post("/api/submit")
 def submit_url(req: SubmitRequest):
     from transcriber import normalize_url, extract_video_id
-    url = normalize_url(req.url.strip())
+    raw = req.url.strip()
+    # Some share sheets (Android, browser extensions) attach a video title
+    # or extra text alongside the link rather than sending a bare URL —
+    # pull the first http(s) URL out of whatever we were given.
+    match = re.search(r"https?://\S+", raw)
+    if match:
+        raw = match.group(0)
+    url = normalize_url(raw)
     if not extract_video_id(url):
         raise HTTPException(400, "Could not find a YouTube video ID in that URL")
     item_id = db.add_item(url, source="manual",

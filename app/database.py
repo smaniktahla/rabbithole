@@ -41,6 +41,12 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+        # Migrate: add docmost_url if missing
+        try:
+            conn.execute("ALTER TABLE items ADD COLUMN docmost_url TEXT")
+            conn.commit()
+        except Exception:
+            pass
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_url ON items(url)")
         conn.commit()
 

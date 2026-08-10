@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import logging
@@ -9,12 +10,24 @@ from config_manager import load_config
 
 logger = logging.getLogger("rabbithole.docmost")
 
+DOCMOST_URL = os.environ.get("DOCMOST_URL", "http://10.10.10.201:3121")
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _nanoid(size=21) -> str:
     """Generate a DocMost-style slug ID."""
     alphabet = string.ascii_letters + string.digits
     return "".join(random.choices(alphabet, k=size))
+
+
+def _title_slug(title: str) -> str:
+    """DocMost-style URL slug prefix for a page title."""
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return slug[:70].rstrip("-")
+
+
+def _page_url(space_slug: str, title: str, slug_id: str) -> str:
+    return f"{DOCMOST_URL}/s/{space_slug}/p/{_title_slug(title)}-{slug_id}"
 
 
 def _get_conn(config: dict):
@@ -204,10 +217,10 @@ def _md_to_tiptap(md: str) -> dict:
 
 # ── Main upsert ───────────────────────────────────────────────────────────────
 
-def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[str]:
+def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[dict]:
     """
     Write or update a DocMost page via direct Postgres.
-    Returns page ID on success, None on failure/disabled.
+    Returns {"page_id": ..., "url": ...} on success, None on failure/disabled.
     """
     config = load_config()
     dm = config.get("docmost", {})
@@ -234,9 +247,13 @@ def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[str]
             conn.close()
             return None
 
+        cur.execute("SELECT slug FROM spaces WHERE id = %s", (space_id,))
+        space_row = cur.fetchone()
+        space_slug = space_row["slug"] if space_row else space_id
+
         # Check for existing page with same title in this space
         cur.execute(
-            "SELECT id FROM pages WHERE space_id = %s AND title = %s "
+            "SELECT id, slug_id FROM pages WHERE space_id = %s AND title = %s "
             "AND deleted_at IS NULL LIMIT 1",
             (space_id, page_title)
         )
@@ -244,6 +261,7 @@ def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[str]
 
         if existing:
             page_id = str(existing["id"])
+            slug_id = existing["slug_id"]
             cur.execute(
                 """UPDATE pages SET
                      content = %s::jsonb,
@@ -255,14 +273,14 @@ def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[str]
             )
             logger.info(f"DocMost updated page {page_id}: {page_title!r}")
         else:
-            slug = _nanoid()
+            slug_id = _nanoid()
             cur.execute(
                 """INSERT INTO pages
                      (slug_id, title, content, text_content,
                       space_id, workspace_id, creator_id, last_updated_by_id)
                    VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s)
                    RETURNING id""",
-                (slug, page_title, content_json, plain_text,
+                (slug_id, page_title, content_json, plain_text,
                  space_id, workspace_id, creator_id, creator_id)
             )
             row = cur.fetchone()
@@ -271,7 +289,7 @@ def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[str]
 
         conn.commit()
         conn.close()
-        return page_id
+        return {"page_id": page_id, "url": _page_url(space_slug, page_title, slug_id)}
 
     except Exception as e:
         logger.error(f"DocMost Postgres error: {e}", exc_info=True)

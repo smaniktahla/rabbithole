@@ -32,7 +32,6 @@ last_email_check: dict = {"time": None, "queued": 0}
 
 ATQ_URL = os.environ.get("ATQ_URL", "http://10.10.10.226:8700")
 ATQ_NOTIFY_TARGET = os.environ.get("ATQ_NOTIFY_TARGET", "hermes-ai2")
-DOCMOST_URL = os.environ.get("DOCMOST_URL", "http://10.10.10.201:3121")
 
 
 def notify(message: str):
@@ -85,13 +84,13 @@ def process_queue():
 
             filepath = write_markdown(url, title, channel, parsed, transcript=transcript)
 
-            docmost_id = None
+            docmost_result = None
             try:
                 with open(filepath, encoding="utf-8") as f:
                     md_content = f.read()
                 db.update_item(item_id, status_message="Syncing to DocMost...")
-                docmost_id = upsert_page(title or "Unknown", md_content,
-                                         parsed.get("subject_area", "misc"))
+                docmost_result = upsert_page(title or "Unknown", md_content,
+                                             parsed.get("subject_area", "misc"))
             except Exception as dm_err:
                 logger.warning(f"DocMost upsert skipped: {dm_err}")
 
@@ -103,13 +102,14 @@ def process_queue():
                 channel=channel,
                 subject_area=parsed.get("subject_area"),
                 file_path=filepath,
-                docmost_page_id=docmost_id,
+                docmost_page_id=(docmost_result or {}).get("page_id"),
+                docmost_url=(docmost_result or {}).get("url"),
                 processed_at=datetime.now().isoformat(),
                 summary=(parsed.get("summary") or "")[:600],
                 tags=json.dumps(parsed.get("tags", []))
             )
             logger.info(f"Done [{item_id}]: '{title}' -> {filepath}")
-            link = f"{DOCMOST_URL}/p/{docmost_id}" if docmost_id else None
+            link = (docmost_result or {}).get("url")
             msg = f"🐰 RabbitHole done: \"{title}\" [{parsed.get('subject_area', 'misc')}]"
             if link:
                 msg += f"\n{link}"
@@ -342,7 +342,9 @@ def reclassify_item(item_id: int, req: ReclassifyRequest):
             md_content = f.read()
         area = req.subject_area if req.subject_area is not None else item.get("subject_area", "misc")
         try:
-            upsert_page(item.get("title") or "Unknown", md_content, area)
+            result = upsert_page(item.get("title") or "Unknown", md_content, area)
+            if result:
+                db.update_item(item_id, docmost_page_id=result["page_id"], docmost_url=result["url"])
         except Exception as e:
             logger.warning(f"DocMost re-sync skipped after reclassify: {e}")
 
@@ -358,15 +360,15 @@ def sync_docmost(item_id: int):
         raise HTTPException(400, "No file on disk to sync")
     with open(item["file_path"], encoding="utf-8") as f:
         md_content = f.read()
-    page_id = upsert_page(
+    result = upsert_page(
         item.get("title") or "Unknown",
         md_content,
         item.get("subject_area") or "misc"
     )
-    if not page_id:
+    if not result:
         raise HTTPException(500, "DocMost sync failed — check logs and DocMost config in Settings")
-    db.update_item(item_id, docmost_page_id=page_id)
-    return {"ok": True, "page_id": page_id}
+    db.update_item(item_id, docmost_page_id=result["page_id"], docmost_url=result["url"])
+    return {"ok": True, "page_id": result["page_id"], "url": result["url"]}
 
 
 @app.get("/api/library/{item_id}/file")

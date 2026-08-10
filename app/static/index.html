@@ -823,9 +823,11 @@ async function openModal(id) {
     document.getElementById('m-footer').innerHTML =
       `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on YouTube ↗</a>` +
       (item.file_path?`<a href="/api/library/${item.id}/file" target="_blank" class="btn-sm btn-blue">Open Doc ↗</a>`:'') +
-      (item.docmost_page_id
-        ? `<span class="btn-sm btn-blue" style="cursor:default;opacity:.65">DocMost ✓</span>`
-        : (item.file_path ? `<button class="btn-sm btn-blue" onclick="syncDocmost(${item.id})">Sync to DocMost</button>` : '')) +
+      (item.docmost_url
+        ? `<a href="${item.docmost_url}" target="_blank" class="btn-sm btn-blue">DocMost ✓ ↗</a>`
+        : (item.docmost_page_id
+          ? `<span class="btn-sm btn-blue" style="cursor:default;opacity:.65">DocMost ✓</span>`
+          : (item.file_path ? `<button class="btn-sm btn-blue" onclick="syncDocmost(${item.id})">Sync to DocMost</button>` : ''))) +
       (item.status === 'error' ? `<button class="btn-sm btn-blue" onclick="retryItem(${item.id})">Retry</button>` : '') +
       `<button class="btn-sm btn-red" onclick="delItem(${item.id})">Remove</button>`;
 

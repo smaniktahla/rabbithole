@@ -91,7 +91,7 @@ def get_items(limit: int = 20, offset: int = 0,
     if search:
         q += " AND (title LIKE ? OR summary LIKE ? OR tags LIKE ? OR channel LIKE ?)"
         s = f"%{search}%"; p.extend([s, s, s, s])
-    q += " ORDER BY COALESCE(processed_at, created_at) DESC LIMIT ? OFFSET ?"
+    q += " ORDER BY CASE WHEN status = 'queued' THEN 0 ELSE 1 END ASC, COALESCE(processed_at, created_at) DESC LIMIT ? OFFSET ?"
     p.extend([limit, offset])
     with get_conn() as conn:
         rows = conn.execute(q, p).fetchall()

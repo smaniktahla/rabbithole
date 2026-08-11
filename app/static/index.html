@@ -828,6 +828,11 @@ async function openModal(id) {
         : (item.docmost_page_id
           ? `<span class="btn-sm btn-blue" style="cursor:default;opacity:.65">DocMost ✓</span>`
           : (item.file_path ? `<button class="btn-sm btn-blue" onclick="syncDocmost(${item.id})">Sync to DocMost</button>` : ''))) +
+      (['cooking','recipes'].includes((item.subject_area||'').toLowerCase()) && item.file_path
+        ? (item.reelmeals_url
+          ? `<a href="${item.reelmeals_url}" target="_blank" class="btn-sm btn-blue">ReelMeals ✓ ↗</a>`
+          : `<button class="btn-sm btn-blue" onclick="sendToReelmeals(${item.id})">Send to ReelMeals</button>`)
+        : '') +
       (item.status === 'error' ? `<button class="btn-sm btn-blue" onclick="retryItem(${item.id})">Retry</button>` : '') +
       `<button class="btn-sm btn-red" onclick="delItem(${item.id})">Remove</button>`;
 
@@ -976,6 +981,16 @@ async function syncDocmost(id){
     if(!r.ok) throw new Error(d.detail||'Sync failed');
     toast('Synced to DocMost ✓','ok');
     openModal(id); // refresh modal to show DocMost ✓
+  } catch(e){ toast(e.message,'err'); }
+}
+
+async function sendToReelmeals(id){
+  try {
+    const r = await fetch(`/api/library/${id}/send-to-reelmeals`, {method:'POST'});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Send failed');
+    toast(d.cached ? 'Already in ReelMeals ✓' : 'Recipe extracted in ReelMeals ✓','ok');
+    openModal(id); // refresh modal to show ReelMeals ✓
   } catch(e){ toast(e.message,'err'); }
 }
 

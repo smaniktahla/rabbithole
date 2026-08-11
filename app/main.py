@@ -32,6 +32,8 @@ last_email_check: dict = {"time": None, "queued": 0}
 
 ATQ_URL = os.environ.get("ATQ_URL", "http://10.10.10.226:8700")
 ATQ_NOTIFY_TARGET = os.environ.get("ATQ_NOTIFY_TARGET", "hermes-ai2")
+REELMEALS_URL = os.environ.get("REELMEALS_URL", "http://10.10.10.13:8092")
+REELMEALS_INGEST_API_KEY = os.environ.get("REELMEALS_INGEST_API_KEY", "")
 
 
 def notify(message: str):
@@ -369,6 +371,44 @@ def sync_docmost(item_id: int):
         raise HTTPException(500, "DocMost sync failed — check logs and DocMost config in Settings")
     db.update_item(item_id, docmost_page_id=result["page_id"], docmost_url=result["url"])
     return {"ok": True, "page_id": result["page_id"], "url": result["url"]}
+
+
+@app.post("/api/library/{item_id}/send-to-reelmeals")
+def send_to_reelmeals(item_id: int):
+    item = db.get_item(item_id)
+    if not item:
+        raise HTTPException(404, "Not found")
+    if not item.get("file_path") or not os.path.exists(item["file_path"]):
+        raise HTTPException(400, "No file on disk to pull a transcript from")
+    if not REELMEALS_INGEST_API_KEY:
+        raise HTTPException(500, "REELMEALS_INGEST_API_KEY is not configured")
+
+    with open(item["file_path"], encoding="utf-8") as f:
+        md_content = f.read()
+    marker = "## Full Transcript\n\n"
+    idx = md_content.find(marker)
+    if idx == -1:
+        raise HTTPException(400, "No transcript found in this item — it may have been processed from a description only")
+    transcript = md_content[idx + len(marker):].strip()
+
+    try:
+        resp = requests.post(
+            f"{REELMEALS_URL}/api/ingest/transcript",
+            headers={"x-api-key": REELMEALS_INGEST_API_KEY},
+            json={"url": item["url"], "title": item.get("title") or "", "transcript": transcript},
+            timeout=60
+        )
+    except requests.RequestException as e:
+        raise HTTPException(502, f"Could not reach ReelMeals: {e}")
+
+    if not resp.ok:
+        detail = resp.json().get("detail", resp.text) if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+        raise HTTPException(resp.status_code, f"ReelMeals: {detail}")
+
+    result = resp.json()
+    recipe_url = f"{REELMEALS_URL}/?recipe={result['slug']}"
+    db.update_item(item_id, reelmeals_url=recipe_url)
+    return {"ok": True, "slug": result["slug"], "cached": result.get("cached", False), "url": recipe_url}
 
 
 @app.get("/api/library/{item_id}/file")

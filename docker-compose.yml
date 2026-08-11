@@ -13,6 +13,8 @@ services:
       - /mnt:/mnt          # exposes all TrueNAS/NFS mounts to container
     environment:
       - TZ=America/New_York
+      - REELMEALS_URL=${REELMEALS_URL:-http://10.10.10.13:8092}
+      - REELMEALS_INGEST_API_KEY=${REELMEALS_INGEST_API_KEY:-}
 
 volumes:
   rabbithole-data:

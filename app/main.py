@@ -396,7 +396,10 @@ def send_to_reelmeals(item_id: int):
             f"{REELMEALS_URL}/api/ingest/transcript",
             headers={"x-api-key": REELMEALS_INGEST_API_KEY},
             json={"url": item["url"], "title": item.get("title") or "", "transcript": transcript},
-            timeout=60
+            # Local LLM extraction on a full transcript can run several
+            # minutes (reasoning models "think" before answering) — give it
+            # real headroom rather than timing out mid-extraction.
+            timeout=300
         )
     except requests.RequestException as e:
         raise HTTPException(502, f"Could not reach ReelMeals: {e}")

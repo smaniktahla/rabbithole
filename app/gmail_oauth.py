@@ -108,9 +108,9 @@ def disconnect() -> None:
 
 
 def check_email_oauth() -> int:
-    """Poll Gmail for unread messages with YouTube links. Returns count queued."""
+    """Poll Gmail for unread messages with YouTube or Reddit links. Returns count queued."""
     import database as db
-    from email_poller import extract_youtube_urls, parse_subject_override
+    from email_poller import extract_youtube_urls, extract_reddit_urls, parse_subject_override
     from googleapiclient.discovery import build
 
     creds = _load_creds()
@@ -139,7 +139,7 @@ def check_email_oauth() -> int:
             body = _extract_body(msg["payload"])
             full_text = subject + "\n" + body
 
-            urls = extract_youtube_urls(full_text)
+            urls = extract_youtube_urls(full_text) + extract_reddit_urls(full_text)
             override = parse_subject_override(subject)
 
             for url in urls:

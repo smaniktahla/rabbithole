@@ -12,6 +12,11 @@ logger = logging.getLogger("rabbithole.email")
 YOUTUBE_RE = re.compile(
     r'(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?(?:[^&\s]*&)*v=|youtu\.be/)([\w-]+)'
 )
+REDDIT_RE = re.compile(
+    r'https?://(?:www\.|old\.|np\.)?reddit\.com/r/[\w-]+/comments/[a-z0-9]+\S*'
+    r'|https?://redd\.it/[a-z0-9]+\S*',
+    re.IGNORECASE
+)
 OVERRIDE_RE = re.compile(r'^\[([^\]]+)\]')
 
 
@@ -21,6 +26,16 @@ def extract_youtube_urls(text: str) -> List[str]:
     for m in YOUTUBE_RE.finditer(text):
         # Normalize to clean watch URL — drops si, feature, list, etc.
         urls.append(f"https://www.youtube.com/watch?v={m.group(1)}")
+    return list(dict.fromkeys(urls))
+
+
+def extract_reddit_urls(text: str) -> List[str]:
+    """Extract and normalize all Reddit post URLs from text."""
+    import reddit
+    urls = []
+    for m in REDDIT_RE.finditer(text):
+        raw = re.sub(r'[)\]>,.;]+$', '', m.group(0))  # trim trailing punctuation
+        urls.append(reddit.normalize_reddit_url(raw))
     return list(dict.fromkeys(urls))
 
 
@@ -48,7 +63,7 @@ def get_email_body(msg) -> str:
 
 
 def check_email() -> int:
-    """Check inbox for YouTube links. Returns count of newly queued items."""
+    """Check inbox for YouTube and Reddit links. Returns count of newly queued items."""
     config = load_config()
 
     # Prefer Gmail OAuth when a token is stored
@@ -86,7 +101,7 @@ def check_email() -> int:
                 body = get_email_body(msg)
                 full_text = f"{subject}\n{body}"
 
-                urls = extract_youtube_urls(full_text)
+                urls = extract_youtube_urls(full_text) + extract_reddit_urls(full_text)
                 override = parse_subject_override(subject)
 
                 for url in urls:

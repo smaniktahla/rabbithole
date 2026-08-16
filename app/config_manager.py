@@ -28,6 +28,10 @@ DEFAULT_CONFIG = {
         "client_id": "",
         "client_secret": ""
     },
+    "reddit": {
+        "client_id": "",
+        "client_secret": ""
+    },
     "default_storage_path": "/mnt/documents/RabbitHole"
 }
 
@@ -50,6 +54,9 @@ def load_config() -> Dict[str, Any]:
     merged_gm = DEFAULT_CONFIG["gmail_oauth"].copy()
     merged_gm.update(config.get("gmail_oauth", {}))
     config["gmail_oauth"] = merged_gm
+    merged_rd = DEFAULT_CONFIG["reddit"].copy()
+    merged_rd.update(config.get("reddit", {}))
+    config["reddit"] = merged_rd
     return config
 
 

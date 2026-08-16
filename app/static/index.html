@@ -428,7 +428,7 @@
         <div class="section-label">drop a link</div>
         <div class="submit-card">
           <div class="url-row">
-            <input id="url-in" class="url-input" type="url" placeholder="https://youtube.com/watch?v=..." />
+            <input id="url-in" class="url-input" type="url" placeholder="https://youtube.com/watch?v=... or reddit.com/r/.../comments/..." />
             <button id="submit-btn" class="submit-btn" onclick="submitUrl()">Queue →</button>
           </div>
           <select id="area-cap" class="area-select">
@@ -527,6 +527,17 @@
           <tbody id="sa-rows"></tbody>
         </table>
         <button class="sa-add" onclick="addSA()">+ Add primary category</button>
+      </div>
+
+      <div class="settings-card">
+        <div class="sc-title">👽 Reddit API</div>
+        <div style="font-size:11px;color:var(--text-dim);line-height:1.6;margin-bottom:10px">
+          Reddit blocks anonymous scraping. Create a free "script" app at
+          <a href="https://www.reddit.com/prefs/apps" target="_blank" style="color:var(--blue)">reddit.com/prefs/apps</a>
+          and paste its ID/secret below.
+        </div>
+        <div class="form-row"><label class="form-label">Client ID</label><input class="form-input" id="c-rd-id" placeholder="the string under the app name" /></div>
+        <div class="form-row"><label class="form-label">Client Secret</label><input class="form-input" id="c-rd-secret" type="password" placeholder="••••••••" /></div>
       </div>
 
       <div class="settings-card wide">
@@ -649,12 +660,14 @@ function tagsHtml(t)  {
   return arr.map(x=>`<span class="tag">${x}</span>`).join('');
 }
 function dot(status)  { return `<span class="status-dot dot-${status}"></span>`; }
+function isReddit(item) { return /reddit\.com|redd\.it/i.test(item.url||''); }
+function sourceIcon(item) { return isReddit(item) ? '👽' : '📺'; }
 
 /* ── Capture ──────────────────────────────────────────────────────────────── */
 async function submitUrl() {
   const url = document.getElementById('url-in').value.trim();
   const area = document.getElementById('area-cap').value;
-  if(!url){ toast('Paste a YouTube URL first','err'); return; }
+  if(!url){ toast('Paste a YouTube or Reddit URL first','err'); return; }
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '...';
   try {
@@ -714,7 +727,7 @@ async function loadRecent() {
     const d = await fetch('/api/library?limit=6&include_active=1').then(r=>r.json());
     const items = d.items||[];
     if(!items.length){
-      document.getElementById('recent-list').innerHTML = `<div class="empty"><div class="empty-icon">🕳</div><div class="empty-title">Nothing yet</div><div class="empty-sub">Paste a YouTube link above to begin</div></div>`;
+      document.getElementById('recent-list').innerHTML = `<div class="empty"><div class="empty-icon">🕳</div><div class="empty-title">Nothing yet</div><div class="empty-sub">Paste a YouTube or Reddit link above to begin</div></div>`;
       return;
     }
     document.getElementById('recent-list').innerHTML = items.map(itemCard).join('');
@@ -730,7 +743,7 @@ function itemCard(item) {
     <div class="item-body">
       <div class="item-title">${item.title||item.url}</div>
       <div class="item-meta">
-        ${item.channel?`<span>📺 ${item.channel}</span>`:''}
+        ${item.channel?`<span>${sourceIcon(item)} ${item.channel}</span>`:''}
         ${item.processed_at?`<span>${ago(item.processed_at)}</span>`:''}
         ${areaBadge(item.subject_area)} ${srcBadge(item.source)}
       </div>
@@ -773,7 +786,7 @@ async function loadLibrary(reset=true) {
             <div class="lib-title">${item.title||item.url}</div>
             <div class="lib-badges">${areaBadge(item.subject_area)} ${srcBadge(item.source)}</div>
           </div>
-          <div class="lib-meta">${item.channel?item.channel+' · ':''}${ago(item.processed_at)}</div>
+          <div class="lib-meta">${item.channel?sourceIcon(item)+' '+item.channel+' · ':''}${ago(item.processed_at)}</div>
           ${item.summary?`<div class="lib-summary">${item.summary}</div>`:''}
           ${tags.length?`<div class="tags-row">${tagsHtml(tags)}</div>`:''}
         </div>
@@ -797,7 +810,7 @@ async function openModal(id) {
     const tags = Array.isArray(item.tags)?item.tags:[];
     document.getElementById('m-title').textContent = item.title||item.url;
     document.getElementById('m-meta').innerHTML =
-      (item.channel?`<span>📺 ${item.channel}</span>`:'') +
+      (item.channel?`<span>${sourceIcon(item)} ${item.channel}</span>`:'') +
       (item.processed_at?`<span>📅 ${new Date(item.processed_at).toLocaleDateString()}</span>`:'') +
       `<span>🔗 <a href="${item.url}" target="_blank" style="color:var(--blue)">${item.url.slice(0,60)}…</a></span>`;
     document.getElementById('m-badges').innerHTML = areaBadge(item.subject_area)+' '+srcBadge(item.source);
@@ -821,7 +834,7 @@ async function openModal(id) {
     document.getElementById('m-save-btn').classList.remove('dirty');
 
     document.getElementById('m-footer').innerHTML =
-      `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on YouTube ↗</a>` +
+      `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on ${isReddit(item)?'Reddit':'YouTube'} ↗</a>` +
       (item.file_path?`<a href="/api/library/${item.id}/file" target="_blank" class="btn-sm btn-blue">Open Doc ↗</a>`:'') +
       (item.docmost_url
         ? `<a href="${item.docmost_url}" target="_blank" class="btn-sm btn-blue">DocMost ✓ ↗</a>`
@@ -1024,6 +1037,8 @@ async function loadSettings(){
     setVal('c-dm-space', cfg.docmost?.space_id||'');
     setVal('c-gm-id',     cfg.gmail_oauth?.client_id||'');
     setVal('c-gm-secret', cfg.gmail_oauth?.client_secret||'');
+    setVal('c-rd-id',     cfg.reddit?.client_id||'');
+    setVal('c-rd-secret', cfg.reddit?.client_secret||'');
     toggleDM(); renderSA(cfg.subject_areas||[]);
     refreshOAuthStatus();
   } catch(e){ console.error(e); }
@@ -1093,7 +1108,9 @@ async function saveSettings(){
               db_password:document.getElementById('c-dm-tok').value,
               space_id:document.getElementById('c-dm-space').value.trim() },
     gmail_oauth:{ client_id:document.getElementById('c-gm-id').value.trim(),
-                  client_secret:document.getElementById('c-gm-secret').value }
+                  client_secret:document.getElementById('c-gm-secret').value },
+    reddit:{ client_id:document.getElementById('c-rd-id').value.trim(),
+             client_secret:document.getElementById('c-rd-secret').value }
   };
   try {
     const r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nc)});

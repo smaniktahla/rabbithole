@@ -14,11 +14,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import database as db
+import reddit
 from config_manager import load_config, save_config
 from docmost import upsert_page
 from email_poller import check_email
-from parser import classify_and_parse
-from storage import write_markdown
+from parser import classify_and_parse, classify_and_parse_reddit
+from storage import write_markdown, write_reddit_markdown
 from transcriber import get_transcript
 
 logging.basicConfig(
@@ -49,6 +50,119 @@ def notify(message: str):
         logger.warning(f"ATQ notify failed: {e}")
 
 
+def _finalize_and_sync(item_id: int, url: str, title: str, channel: str,
+                       parsed: dict, filepath: str):
+    """Shared tail: sync to DocMost, mark done, and notify. Used by both the
+    YouTube and Reddit processing paths once a markdown file has been written."""
+    docmost_result = None
+    try:
+        with open(filepath, encoding="utf-8") as f:
+            md_content = f.read()
+        db.update_item(item_id, status_message="Syncing to DocMost...")
+        docmost_result = upsert_page(title or "Unknown", md_content,
+                                     parsed.get("subject_area", "misc"))
+    except Exception as dm_err:
+        logger.warning(f"DocMost upsert skipped: {dm_err}")
+
+    db.update_item(
+        item_id,
+        status="done",
+        status_message=None,
+        title=title,
+        channel=channel,
+        subject_area=parsed.get("subject_area"),
+        file_path=filepath,
+        docmost_page_id=(docmost_result or {}).get("page_id"),
+        docmost_url=(docmost_result or {}).get("url"),
+        processed_at=datetime.now().isoformat(),
+        summary=(parsed.get("summary") or "")[:600],
+        tags=json.dumps(parsed.get("tags", []))
+    )
+    logger.info(f"Done [{item_id}]: '{title}' -> {filepath}")
+    link = (docmost_result or {}).get("url")
+    msg = f"🐰 RabbitHole done: \"{title}\" [{parsed.get('subject_area', 'misc')}]"
+    if link:
+        msg += f"\n{link}"
+    notify(msg)
+
+
+def _process_reddit_item(item_id: int, url: str, item: dict):
+    db.update_item(item_id, status="processing",
+                   status_message="Fetching Reddit post + comments...")
+    logger.info(f"Processing [{item_id}] (reddit): {url}")
+
+    content = reddit.get_reddit_content(url)
+    if not content:
+        db.update_item(item_id, status="error", status_message=None,
+                       error_message="Could not fetch Reddit post (deleted, private, or unreachable)")
+        notify(f"🐰 RabbitHole failed: {url} — could not fetch Reddit post")
+        return
+
+    title = content["title"]
+    subreddit = content["subreddit"]
+    comments_block = reddit.format_comments_block(content["comments"])
+
+    db.update_item(item_id, title=title, channel=subreddit,
+                   status_message=f"Post + {len(content['comments'])} comments fetched — sending to LLM...")
+
+    parsed = classify_and_parse_reddit(
+        url=content["permalink"],
+        title=title,
+        subreddit=subreddit,
+        author=content["author"],
+        score=content["score"],
+        num_comments=content["num_comments"],
+        post_body=content["selftext"],
+        comments_block=comments_block,
+        subject_area_override=item.get("subject_area")
+    )
+
+    db.update_item(item_id,
+                   status_message=f"Writing markdown → {parsed.get('subject_area', 'misc')}...")
+
+    filepath = write_reddit_markdown(
+        content["permalink"], title, subreddit, content["author"],
+        content["score"], content["num_comments"], parsed,
+        post_body=content["selftext"], link_url=content["link_url"],
+        comments_block=comments_block
+    )
+
+    _finalize_and_sync(item_id, content["permalink"], title, subreddit, parsed, filepath)
+
+
+def _process_youtube_item(item_id: int, url: str, item: dict):
+    db.update_item(item_id, status="processing",
+                   status_message="Fetching transcript via yt-dlp...")
+    logger.info(f"Processing [{item_id}]: {url}")
+
+    transcript, title, channel = get_transcript(url)
+    if not transcript:
+        db.update_item(item_id, status="error",
+                       status_message=None,
+                       error_message="Could not extract transcript or captions")
+        notify(f"🐰 RabbitHole failed: {url} — could not extract transcript or captions")
+        return
+
+    db.update_item(item_id,
+                   title=title, channel=channel,
+                   status_message=f"Transcript fetched ({len(transcript):,} chars) — sending to LLM...")
+
+    parsed = classify_and_parse(
+        url=url,
+        title=title or "Unknown",
+        channel=channel or "Unknown",
+        transcript=transcript,
+        subject_area_override=item.get("subject_area")
+    )
+
+    db.update_item(item_id,
+                   status_message=f"Writing markdown → {parsed.get('subject_area', 'misc')}...")
+
+    filepath = write_markdown(url, title, channel, parsed, transcript=transcript)
+
+    _finalize_and_sync(item_id, url, title, channel, parsed, filepath)
+
+
 def process_queue():
     items = db.get_queued_items()
     if not items:
@@ -57,65 +171,10 @@ def process_queue():
         item_id = item["id"]
         url = item["url"]
         try:
-            db.update_item(item_id, status="processing",
-                           status_message="Fetching transcript via yt-dlp...")
-            logger.info(f"Processing [{item_id}]: {url}")
-
-            transcript, title, channel = get_transcript(url)
-            if not transcript:
-                db.update_item(item_id, status="error",
-                               status_message=None,
-                               error_message="Could not extract transcript or captions")
-                notify(f"🐰 RabbitHole failed: {url} — could not extract transcript or captions")
-                continue
-
-            db.update_item(item_id,
-                           title=title, channel=channel,
-                           status_message=f"Transcript fetched ({len(transcript):,} chars) — sending to LLM...")
-
-            parsed = classify_and_parse(
-                url=url,
-                title=title or "Unknown",
-                channel=channel or "Unknown",
-                transcript=transcript,
-                subject_area_override=item.get("subject_area")
-            )
-
-            db.update_item(item_id,
-                           status_message=f"Writing markdown → {parsed.get('subject_area', 'misc')}...")
-
-            filepath = write_markdown(url, title, channel, parsed, transcript=transcript)
-
-            docmost_result = None
-            try:
-                with open(filepath, encoding="utf-8") as f:
-                    md_content = f.read()
-                db.update_item(item_id, status_message="Syncing to DocMost...")
-                docmost_result = upsert_page(title or "Unknown", md_content,
-                                             parsed.get("subject_area", "misc"))
-            except Exception as dm_err:
-                logger.warning(f"DocMost upsert skipped: {dm_err}")
-
-            db.update_item(
-                item_id,
-                status="done",
-                status_message=None,
-                title=title,
-                channel=channel,
-                subject_area=parsed.get("subject_area"),
-                file_path=filepath,
-                docmost_page_id=(docmost_result or {}).get("page_id"),
-                docmost_url=(docmost_result or {}).get("url"),
-                processed_at=datetime.now().isoformat(),
-                summary=(parsed.get("summary") or "")[:600],
-                tags=json.dumps(parsed.get("tags", []))
-            )
-            logger.info(f"Done [{item_id}]: '{title}' -> {filepath}")
-            link = (docmost_result or {}).get("url")
-            msg = f"🐰 RabbitHole done: \"{title}\" [{parsed.get('subject_area', 'misc')}]"
-            if link:
-                msg += f"\n{link}"
-            notify(msg)
+            if reddit.is_reddit_url(url):
+                _process_reddit_item(item_id, url, item)
+            else:
+                _process_youtube_item(item_id, url, item)
 
         except Exception as e:
             logger.error(f"Failed [{item_id}] {url}: {e}", exc_info=True)
@@ -165,9 +224,16 @@ def submit_url(req: SubmitRequest):
     match = re.search(r"https?://\S+", raw)
     if match:
         raw = match.group(0)
-    url = normalize_url(raw)
-    if not extract_video_id(url):
-        raise HTTPException(400, "Could not find a YouTube video ID in that URL")
+
+    if reddit.is_reddit_url(raw):
+        if not reddit.extract_post_id(raw):
+            raise HTTPException(400, "That's a Reddit URL but not a specific post — link to a post's comments page")
+        url = reddit.normalize_reddit_url(raw)
+    else:
+        url = normalize_url(raw)
+        if not extract_video_id(url):
+            raise HTTPException(400, "Could not find a YouTube video ID or Reddit post in that URL")
+
     item_id = db.add_item(url, source="manual",
                           subject_area_override=req.subject_area or None)
     if item_id == -1:
@@ -256,6 +322,8 @@ def get_config():
         safe["docmost"]["db_password"] = "••••••••"
     if safe.get("gmail_oauth", {}).get("client_secret"):
         safe["gmail_oauth"]["client_secret"] = "••••••••"
+    if safe.get("reddit", {}).get("client_secret"):
+        safe["reddit"]["client_secret"] = "••••••••"
     return safe
 
 
@@ -273,6 +341,11 @@ def update_config(new_config: dict):
         saved_pw = current.get("docmost", {}).get("db_password", "")
         if saved_pw:
             new_config.setdefault("docmost", {})["db_password"] = saved_pw
+    incoming_rd_secret = new_config.get("reddit", {}).get("client_secret", "")
+    if not incoming_rd_secret or incoming_rd_secret.startswith("•"):
+        saved_secret = current.get("reddit", {}).get("client_secret", "")
+        if saved_secret:
+            new_config.setdefault("reddit", {})["client_secret"] = saved_secret
     save_config(new_config)
     try:
         interval = int(new_config.get("email", {}).get("check_interval_minutes", 5))

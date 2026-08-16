@@ -1,11 +1,12 @@
 # 🐇 RabbitHole
 
-A self-hosted YouTube knowledge capture tool. Drop a link (or forward an email), get a structured summary, key points, and tags — saved to markdown on disk and optionally synced to [DocMost](https://docmost.com) (DocMost sync requires some custom code). Great for ingesting info from YouTube to use for AI RAG or just adding to your own notes without having to watch an entire video. Let the AI take the notes for you!
+A self-hosted YouTube + Reddit knowledge capture tool. Drop a link (or forward an email), get a structured summary, key points, and tags — saved to markdown on disk and optionally synced to [DocMost](https://docmost.com) (DocMost sync requires some custom code). Great for ingesting info from YouTube videos or Reddit threads to use for AI RAG or just adding to your own notes without having to watch/read the whole thing. Let the AI take the notes for you!
 <img width="1577" height="1181" alt="image" src="https://github.com/user-attachments/assets/6996d036-12c5-4891-a928-05ce2528b818" />
 
 ## What it does
 
 - **Captures YouTube videos** — paste a URL manually or forward an email containing a YouTube link
+- **Captures Reddit threads** — paste a post URL and get a summary of the OP plus the highest-signal comments, not just the top post
 - **Transcribes and summarizes** using an LLM (local via llama.cpp/Ollama, or Anthropic Claude)
 - **Classifies** each item into a primary category, writes structured markdown to disk, and generates searchable tags
 - **Syncs to DocMost** — optionally pushes each note into a DocMost wiki space via direct Postgres
@@ -45,6 +46,7 @@ Everything is configured through the **Settings** tab in the UI — no env file 
 | **Default Storage Path** | Root folder for markdown files, e.g. `/mnt/documents/RabbitHole` |
 | **Primary Categories** | Named categories mapped to storage subfolders |
 | **Gmail / IMAP** | App password or OAuth credentials for email polling |
+| **Reddit API** (optional) | Client ID/secret if you have working OAuth credentials; not required — see [Reddit capture](#reddit-capture) |
 | **DocMost** | Postgres host, password, and Space ID |
 
 ## Email capture
@@ -54,7 +56,18 @@ Two modes:
 - **IMAP app password** — polls a Gmail inbox for emails tagged `[RH]` in the subject line
 - **Gmail OAuth** — connect via the Settings tab; same `[RH]` subject tag triggers capture
 
-Forward any email containing a YouTube URL with `[RH]` in the subject and it gets queued automatically.
+Forward any email containing a YouTube or Reddit URL with `[RH]` in the subject and it gets queued automatically.
+
+## Reddit capture
+
+Reddit closed self-serve OAuth app registration in Nov 2025 ("Responsible Builder Policy"), so RabbitHole doesn't depend on Reddit API credentials at all. A plain HTTP request to `.json` gets blocked (403) even with a normal User-Agent, but a *browser session with real cookies* is allowed through — so RabbitHole uses a headless Chromium (Playwright) to load the post's real page first, then fetches the `.json` data from that same session. No Reddit account, app, or credentials needed.
+
+- The **Reddit API** card in Settings is still there and used automatically *if* you happen to have working OAuth credentials (e.g. from before the policy change) — it's tried first as a fast path, then falls back to the headless-browser method. Most people can leave it blank.
+- Paste any post URL (`reddit.com/r/.../comments/...` or a `redd.it/...` short link) into the capture box.
+
+RabbitHole pulls the OP's post plus the top comments (score-filtered, one reply level deep) and asks the LLM to summarize both the original post and the most valuable discussion/consensus from the thread — not just the headline post.
+
+The headless-browser fallback needs Chromium bundled in the image (`playwright install --with-deps chromium` in the Dockerfile), which adds real build time and image size — expect a slower first build after pulling this change.
 
 ## Library features
 
@@ -92,6 +105,8 @@ tags: [ai-agents, llm, tool-use]
 ## Full Transcript
 ...
 ```
+
+A captured Reddit thread instead has `subreddit`/`author`/`score` frontmatter and `## Original Post` / `## Top Comments` sections in place of channel/transcript.
 
 ## Ports & volumes
 

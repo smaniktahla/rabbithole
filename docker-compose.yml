@@ -15,6 +15,17 @@ services:
       - TZ=America/New_York
       - REELMEALS_URL=${REELMEALS_URL:-http://10.10.10.13:8092}
       - REELMEALS_INGEST_API_KEY=${REELMEALS_INGEST_API_KEY:-}
+      - BGUTIL_POT_BASE_URL=http://bgutil-provider:4416
+    depends_on:
+      - bgutil-provider
+
+  # Generates YouTube PO tokens (proof-of-origin) for age-restricted/gated
+  # videos that plain cookies can't get past. yt-dlp's bgutil-ytdlp-pot-provider
+  # plugin (in requirements.txt) talks to this over the compose network.
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: rabbithole-bgutil-provider
+    restart: unless-stopped
 
 volumes:
   rabbithole-data:

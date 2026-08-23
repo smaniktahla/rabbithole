@@ -135,12 +135,13 @@ def _process_youtube_item(item_id: int, url: str, item: dict):
                    status_message="Fetching transcript via yt-dlp...")
     logger.info(f"Processing [{item_id}]: {url}")
 
-    transcript, title, channel = get_transcript(url)
+    transcript, title, channel, error_reason = get_transcript(url)
     if not transcript:
+        error_message = error_reason or "Could not extract transcript or captions"
         db.update_item(item_id, status="error",
                        status_message=None,
-                       error_message="Could not extract transcript or captions")
-        notify(f"🐰 RabbitHole failed: {url} — could not extract transcript or captions")
+                       error_message=error_message)
+        notify(f"🐰 RabbitHole failed: {url} — {error_message}")
         return
 
     db.update_item(item_id,

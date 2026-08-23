@@ -16,10 +16,52 @@ YOUTUBE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{11}$')
 YOUTUBE_COOKIES_PATH = os.environ.get("YOUTUBE_COOKIES_PATH", "/app/data/youtube_cookies.txt")
 
 
-def _ydl_opts(**extra) -> dict:
-    opts = {"skip_download": True, "quiet": True, "no_warnings": True, **extra}
+def _authenticated_session():
+    """A requests.Session carrying the exported YouTube cookies, if present."""
+    import http.cookiejar
+    import requests
+
+    session = requests.Session()
     if os.path.isfile(YOUTUBE_COOKIES_PATH):
-        opts["cookiefile"] = YOUTUBE_COOKIES_PATH
+        jar = http.cookiejar.MozillaCookieJar(YOUTUBE_COOKIES_PATH)
+        jar.load(ignore_discard=True, ignore_expires=True)
+        session.cookies.update(jar)
+    return session
+
+
+def _scratch_cookiefile() -> Optional[str]:
+    """
+    A disposable copy of the master cookie file for yt-dlp to use.
+
+    yt-dlp treats `cookiefile` as read-write and rewrites it after every run —
+    and its writer silently drops HttpOnly cookies, which is exactly the auth
+    cookies (SID, APISID, SAPISID, LOGIN_INFO, __Secure-1PSID, ...) that make
+    the session logged-in. Handing it the master file corrupts it within one
+    call. Copy to a throwaway temp path each time instead.
+    """
+    if not os.path.isfile(YOUTUBE_COOKIES_PATH):
+        return None
+    import shutil
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".txt", prefix="ytcookies_")
+    os.close(fd)
+    shutil.copyfile(YOUTUBE_COOKIES_PATH, path)
+    return path
+
+
+def _ydl_opts(cookiefile: Optional[str] = None, **extra) -> dict:
+    # remote_components pulls yt-dlp's JS challenge-solver script (run via the
+    # Deno runtime baked into the image) — without it YouTube's "n" signature
+    # challenge can't be solved and only image formats resolve.
+    opts = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "remote_components": {"ejs:github"},
+        **extra,
+    }
+    if cookiefile:
+        opts["cookiefile"] = cookiefile
     return opts
 
 
@@ -67,7 +109,9 @@ def get_transcript(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
     # Strategy 1: youtube-transcript-api (v1.x instance API — no more classmethods)
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        fetched = YouTubeTranscriptApi().fetch(video_id, languages=["en", "en-US", "en-GB"])
+        fetched = YouTubeTranscriptApi(http_client=_authenticated_session()).fetch(
+            video_id, languages=["en", "en-US", "en-GB"]
+        )
         text = " ".join(s.text for s in fetched)
         text = re.sub(r'\s+', ' ', text).strip()
         title, channel = _get_metadata(url)
@@ -76,10 +120,12 @@ def get_transcript(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
     except Exception as e:
         logger.warning(f"[{video_id}] youtube-transcript-api failed: {e}")
 
-    # Strategy 2: yt-dlp with auto-generated captions
+    # Strategy 2: yt-dlp with existing (creator or auto-generated) captions
+    title, channel = None, None
+    cookiefile = _scratch_cookiefile()
     try:
         import yt_dlp
-        with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
+        with yt_dlp.YoutubeDL(_ydl_opts(cookiefile=cookiefile)) as ydl:
             info = ydl.extract_info(url, download=False)
             title = info.get("title")
             channel = info.get("uploader") or info.get("channel")
@@ -102,27 +148,95 @@ def get_transcript(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
                             except Exception as sub_e:
                                 logger.warning(f"[{video_id}] Sub download failed: {sub_e}")
 
-            # Last resort: description
-            desc = info.get("description", "")
-            if desc:
-                logger.warning(f"[{video_id}] No transcript found, using description")
-                return desc[:8000], title, channel
-
-            return None, title, channel
-
     except Exception as e:
-        logger.error(f"[{video_id}] yt-dlp failed: {e}")
-        return None, None, None
+        logger.error(f"[{video_id}] yt-dlp caption lookup failed: {e}")
+    finally:
+        if cookiefile:
+            os.unlink(cookiefile)
+
+    # Strategy 3: no captions exist at all — transcribe the audio with Whisper
+    text = _transcribe_with_whisper(url, video_id)
+    if text:
+        return text, title, channel
+
+    # Last resort: video description
+    if title is None:
+        title, channel = _get_metadata(url)
+    return None, title, channel
 
 
 def _get_metadata(url: str) -> Tuple[Optional[str], Optional[str]]:
+    cookiefile = _scratch_cookiefile()
     try:
         import yt_dlp
-        with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
+        with yt_dlp.YoutubeDL(_ydl_opts(cookiefile=cookiefile)) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get("title"), info.get("uploader") or info.get("channel")
     except Exception:
         return None, None
+    finally:
+        if cookiefile:
+            os.unlink(cookiefile)
+
+
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+_whisper_model = None
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        logger.info(f"Loading Whisper model '{WHISPER_MODEL}' (first use, may take a moment)")
+        _whisper_model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+    return _whisper_model
+
+
+def _transcribe_with_whisper(url: str, video_id: str) -> Optional[str]:
+    """Downloads audio only and runs local speech-to-text — last-resort path
+    for videos with no creator or auto-generated captions at all."""
+    import shutil
+    import tempfile
+
+    cookiefile = _scratch_cookiefile()
+    tmp_dir = tempfile.mkdtemp(prefix="ytaudio_")
+    try:
+        import yt_dlp
+        audio_path = os.path.join(tmp_dir, f"{video_id}.mp3")
+        opts = _ydl_opts(
+            cookiefile=cookiefile,
+            format="bestaudio/best",
+            outtmpl=os.path.join(tmp_dir, "%(id)s.%(ext)s"),
+            postprocessors=[{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "64",
+            }],
+        )
+        opts["skip_download"] = False
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info(url, download=True)
+
+        if not os.path.isfile(audio_path):
+            logger.warning(f"[{video_id}] Whisper: no audio file produced")
+            return None
+
+        model = _get_whisper_model()
+        segments, _info = model.transcribe(audio_path, language="en")
+        text = " ".join(seg.text.strip() for seg in segments)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if text:
+            logger.info(f"[{video_id}] Transcript via Whisper ({len(text)} chars)")
+            return text
+        return None
+
+    except Exception as e:
+        logger.error(f"[{video_id}] Whisper transcription failed: {e}")
+        return None
+    finally:
+        if cookiefile:
+            os.unlink(cookiefile)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _parse_vtt(vtt: str) -> str:

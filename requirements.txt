@@ -12,3 +12,4 @@ imapclient>=3.0.1
 psycopg2-binary>=2.9.9
 google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.100.0
+faster-whisper>=1.0.0

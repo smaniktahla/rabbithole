@@ -1,3 +1,4 @@
+import os
 import re
 import logging
 import urllib.request
@@ -8,6 +9,18 @@ from urllib.parse import parse_qs, urlparse
 logger = logging.getLogger("rabbithole.transcriber")
 
 YOUTUBE_ID_RE = re.compile(r'^[A-Za-z0-9_-]{11}$')
+
+# Exported via a browser extension (e.g. "Get cookies.txt LOCALLY") and dropped
+# into the persistent data volume. Optional — only used if present, to get
+# yt-dlp past YouTube's "Sign in to confirm you're not a bot" wall.
+YOUTUBE_COOKIES_PATH = os.environ.get("YOUTUBE_COOKIES_PATH", "/app/data/youtube_cookies.txt")
+
+
+def _ydl_opts(**extra) -> dict:
+    opts = {"skip_download": True, "quiet": True, "no_warnings": True, **extra}
+    if os.path.isfile(YOUTUBE_COOKIES_PATH):
+        opts["cookiefile"] = YOUTUBE_COOKIES_PATH
+    return opts
 
 
 def extract_video_id(url: str) -> Optional[str]:
@@ -51,11 +64,11 @@ def get_transcript(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
         logger.error(f"Could not extract video ID from: {url}")
         return None, None, None
 
-    # Strategy 1: youtube-transcript-api
+    # Strategy 1: youtube-transcript-api (v1.x instance API — no more classmethods)
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        segs = YouTubeTranscriptApi.get_transcript(video_id, languages=["en", "en-US", "en-GB"])
-        text = " ".join(s["text"] for s in segs)
+        fetched = YouTubeTranscriptApi().fetch(video_id, languages=["en", "en-US", "en-GB"])
+        text = " ".join(s.text for s in fetched)
         text = re.sub(r'\s+', ' ', text).strip()
         title, channel = _get_metadata(url)
         logger.info(f"[{video_id}] Transcript via youtube-transcript-api ({len(text)} chars)")
@@ -66,12 +79,7 @@ def get_transcript(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
     # Strategy 2: yt-dlp with auto-generated captions
     try:
         import yt_dlp
-        ydl_opts = {
-            "skip_download": True,
-            "quiet": True,
-            "no_warnings": True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
             info = ydl.extract_info(url, download=False)
             title = info.get("title")
             channel = info.get("uploader") or info.get("channel")
@@ -110,7 +118,7 @@ def get_transcript(url: str) -> Tuple[Optional[str], Optional[str], Optional[str
 def _get_metadata(url: str) -> Tuple[Optional[str], Optional[str]]:
     try:
         import yt_dlp
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
+        with yt_dlp.YoutubeDL(_ydl_opts()) as ydl:
             info = ydl.extract_info(url, download=False)
             return info.get("title"), info.get("uploader") or info.get("channel")
     except Exception:

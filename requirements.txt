@@ -14,3 +14,4 @@ google-auth-oauthlib>=1.2.0
 google-api-python-client>=2.100.0
 faster-whisper>=1.0.0
 bgutil-ytdlp-pot-provider>=1.0.0
+smbprotocol>=1.10.1

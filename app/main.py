@@ -2,13 +2,16 @@ import os
 import re
 import json
 import logging
+import shutil
+import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
 import requests
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,11 +19,14 @@ from pydantic import BaseModel
 import database as db
 import reddit
 from config_manager import load_config, save_config
-from docmost import upsert_page
+from docmost import upsert_page, list_spaces
 from email_poller import check_email
 from parser import classify_and_parse, classify_and_parse_reddit
 from storage import write_markdown, write_reddit_markdown
-from transcriber import get_transcript
+from transcriber import (get_transcript, is_smb_video_path, parse_smb_path,
+                         smb_file_exists, fetch_smb_file, strip_wrapping_quotes,
+                         title_from_filename, parent_folder_name, transcribe_local_file,
+                         LOCAL_VIDEO_EXTENSIONS, UPLOADS_DIR, is_uploaded_file_path)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,7 +57,7 @@ def notify(message: str):
 
 
 def _finalize_and_sync(item_id: int, url: str, title: str, channel: str,
-                       parsed: dict, filepath: str):
+                       parsed: dict, filepath: str, docmost_space_id: str = None):
     """Shared tail: sync to DocMost, mark done, and notify. Used by both the
     YouTube and Reddit processing paths once a markdown file has been written."""
     docmost_result = None
@@ -60,7 +66,8 @@ def _finalize_and_sync(item_id: int, url: str, title: str, channel: str,
             md_content = f.read()
         db.update_item(item_id, status_message="Syncing to DocMost...")
         docmost_result = upsert_page(title or "Unknown", md_content,
-                                     parsed.get("subject_area", "misc"))
+                                     parsed.get("subject_area", "misc"),
+                                     space_id=docmost_space_id)
     except Exception as dm_err:
         logger.warning(f"DocMost upsert skipped: {dm_err}")
 
@@ -127,7 +134,135 @@ def _process_reddit_item(item_id: int, url: str, item: dict):
         comments_block=comments_block
     )
 
-    _finalize_and_sync(item_id, content["permalink"], title, subreddit, parsed, filepath)
+    _finalize_and_sync(item_id, content["permalink"], title, subreddit, parsed, filepath,
+                       docmost_space_id=item.get("docmost_space_id"))
+
+
+def _process_uploaded_item(item_id: int, path: str, item: dict):
+    title = title_from_filename(path)
+
+    if not os.path.isfile(path):
+        # Retry on an upload whose temp copy was already discarded (a prior
+        # run either finished successfully or hit a deterministic failure
+        # that made retrying the same bytes pointless). There's no source
+        # left to re-fetch from — unlike YouTube/SMB, an upload only ever
+        # exists as long as we're actively processing it.
+        db.update_item(item_id, status="error", status_message=None, title=title,
+                       error_message="This upload was already discarded (processed or a "
+                                     "non-retryable failure) — re-upload the file to try again.")
+        logger.warning(f"[{item_id}] Retry on uploaded file with no temp copy left: {path}")
+        return
+
+    db.update_item(item_id, status="processing",
+                   status_message="Transcribing uploaded file with Whisper (may take a while)...")
+    logger.info(f"Processing [{item_id}] (uploaded file): {path}")
+
+    upload_dir = os.path.dirname(path)
+    # The uploaded temp file is deleted once we're done with it, so replace
+    # the DB's `url` (currently that temp path) with something durable and
+    # human-readable — scoped by item_id so same-named uploads stay unique.
+    display_source = f"Uploaded file: {os.path.basename(path)} (#{item_id})"
+
+    try:
+        transcript, error_reason = transcribe_local_file(path)
+        if not transcript:
+            error_message = error_reason or "Whisper produced no transcript for this file"
+            db.update_item(item_id, status="error", status_message=None,
+                           error_message=error_message, title=title)
+            notify(f"🐰 RabbitHole failed: {title} — {error_message}")
+            # Deterministic — same bytes will fail Whisper the same way
+            # again, so there's nothing a retry could gain from keeping this.
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            return
+
+        db.update_item(item_id, title=title,
+                       status_message=f"Transcript ready ({len(transcript):,} chars) — sending to LLM...")
+
+        parsed = classify_and_parse(
+            url=display_source,
+            title=title,
+            channel="Uploaded",
+            transcript=transcript,
+            subject_area_override=item.get("subject_area")
+        )
+
+        db.update_item(item_id,
+                       status_message=f"Writing markdown → {parsed.get('subject_area', 'misc')}...")
+
+        filepath = write_markdown(display_source, title, "Uploaded", parsed, transcript=transcript)
+
+        _finalize_and_sync(item_id, display_source, title, "Uploaded", parsed, filepath,
+                           docmost_space_id=item.get("docmost_space_id"))
+        # The uploaded temp file is deleted now that we're fully done with
+        # it — swap the DB's `url` (currently that temp path) for something
+        # durable and readable, since the path itself won't exist anymore.
+        db.update_item(item_id, url=display_source)
+        shutil.rmtree(upload_dir, ignore_errors=True)
+    except Exception as e:
+        # Transient failure (LLM call, DocMost sync, etc) — leave the
+        # uploaded file in place so Retry can pick up from transcription
+        # again without asking the user to re-upload.
+        logger.error(f"[{item_id}] Upload transcribe failed: {e}", exc_info=True)
+        db.update_item(item_id, status="error", status_message=None, error_message=str(e)[:500])
+        notify(f"🐰 RabbitHole failed: {title} — {str(e)[:200]}")
+
+
+def _process_smb_item(item_id: int, raw_path: str, item: dict):
+    db.update_item(item_id, status="processing", status_message="Resolving SMB path...")
+    logger.info(f"Processing [{item_id}] (SMB file): {raw_path}")
+
+    config = load_config()
+    smb_cfg = config.get("smb", {})
+    try:
+        host, share, rel_path = parse_smb_path(raw_path, default_host=smb_cfg.get("default_host"))
+    except ValueError as e:
+        db.update_item(item_id, status="error", status_message=None, error_message=str(e))
+        notify(f"🐰 RabbitHole failed: {raw_path} — {e}")
+        return
+
+    title = title_from_filename(rel_path)
+    channel = parent_folder_name(rel_path)
+
+    tmp_dir = tempfile.mkdtemp(prefix="rh_smb_")
+    try:
+        db.update_item(item_id, title=title, channel=channel,
+                       status_message=f"Downloading over SMB from \\\\{host}\\{share}...")
+        local_path = fetch_smb_file(host, share, rel_path, smb_cfg, tmp_dir)
+
+        db.update_item(item_id, status_message="Transcribing with Whisper (may take a while)...")
+        transcript, error_reason = transcribe_local_file(local_path)
+        if not transcript:
+            error_message = error_reason or "Whisper produced no transcript for this file"
+            db.update_item(item_id, status="error", status_message=None, error_message=error_message)
+            notify(f"🐰 RabbitHole failed: {raw_path} — {error_message}")
+            return
+
+        db.update_item(item_id,
+                       status_message=f"Transcript ready ({len(transcript):,} chars) — sending to LLM...")
+
+        parsed = classify_and_parse(
+            url=raw_path,
+            title=title,
+            channel=channel or "Unknown",
+            transcript=transcript,
+            subject_area_override=item.get("subject_area")
+        )
+
+        db.update_item(item_id,
+                       status_message=f"Writing markdown → {parsed.get('subject_area', 'misc')}...")
+
+        filepath = write_markdown(raw_path, title, channel, parsed, transcript=transcript)
+
+        _finalize_and_sync(item_id, raw_path, title, channel, parsed, filepath,
+                           docmost_space_id=item.get("docmost_space_id"))
+    except Exception as e:
+        logger.error(f"[{item_id}] SMB fetch/transcribe failed: {e}", exc_info=True)
+        db.update_item(item_id, status="error", status_message=None, error_message=str(e)[:500])
+        notify(f"🐰 RabbitHole failed: {raw_path} — {str(e)[:200]}")
+    finally:
+        # Downloaded video is scratch data — discard it once we're done with
+        # it (whether that ended in success or failure), never keep a copy.
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _process_youtube_item(item_id: int, url: str, item: dict):
@@ -161,7 +296,8 @@ def _process_youtube_item(item_id: int, url: str, item: dict):
 
     filepath = write_markdown(url, title, channel, parsed, transcript=transcript)
 
-    _finalize_and_sync(item_id, url, title, channel, parsed, filepath)
+    _finalize_and_sync(item_id, url, title, channel, parsed, filepath,
+                       docmost_space_id=item.get("docmost_space_id"))
 
 
 def process_queue():
@@ -174,6 +310,10 @@ def process_queue():
         try:
             if reddit.is_reddit_url(url):
                 _process_reddit_item(item_id, url, item)
+            elif is_uploaded_file_path(url):
+                _process_uploaded_item(item_id, url, item)
+            elif is_smb_video_path(url):
+                _process_smb_item(item_id, url, item)
             else:
                 _process_youtube_item(item_id, url, item)
 
@@ -213,6 +353,7 @@ app = FastAPI(title="RabbitHole", lifespan=lifespan)
 class SubmitRequest(BaseModel):
     url: str
     subject_area: Optional[str] = None
+    docmost_space_id: Optional[str] = None
 
 
 @app.post("/api/submit")
@@ -230,13 +371,32 @@ def submit_url(req: SubmitRequest):
         if not reddit.extract_post_id(raw):
             raise HTTPException(400, "That's a Reddit URL but not a specific post — link to a post's comments page")
         url = reddit.normalize_reddit_url(raw)
+    elif is_smb_video_path(raw):
+        config = load_config()
+        smb_cfg = config.get("smb", {})
+        if not smb_cfg.get("username") or not smb_cfg.get("password"):
+            raise HTTPException(400, "SMB credentials aren't configured — set Username/Password "
+                                     "(and Default Host, for local drive-letter paths) in Settings")
+        url = strip_wrapping_quotes(raw)
+        try:
+            host, share, rel_path = parse_smb_path(url, default_host=smb_cfg.get("default_host"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        try:
+            found = smb_file_exists(host, share, rel_path, smb_cfg)
+        except Exception as e:
+            raise HTTPException(400, f"Could not reach \\\\{host}\\{share}: {e}")
+        if not found:
+            raise HTTPException(400, f"File not found on the share: \\\\{host}\\{share}\\{rel_path}")
     else:
         url = normalize_url(raw)
         if not extract_video_id(url):
-            raise HTTPException(400, "Could not find a YouTube video ID or Reddit post in that URL")
+            raise HTTPException(400, "Could not find a YouTube video ID or Reddit post in that URL, "
+                                     "and it's not a local/SMB video path")
 
     item_id = db.add_item(url, source="manual",
-                          subject_area_override=req.subject_area or None)
+                          subject_area_override=req.subject_area or None,
+                          docmost_space_id=req.docmost_space_id or None)
     if item_id == -1:
         # Already exists — if it errored, re-queue it
         with db.get_conn() as conn:
@@ -246,6 +406,33 @@ def submit_url(req: SubmitRequest):
             return {"id": row["id"], "message": "Re-queued for processing"}
         raise HTTPException(409, "URL is already in the library")
     return {"id": item_id, "message": "Queued — will process within ~1 minute"}
+
+
+@app.post("/api/submit-file")
+async def submit_file(file: UploadFile = File(...),
+                      subject_area: Optional[str] = Form(None),
+                      docmost_space_id: Optional[str] = Form(None)):
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in LOCAL_VIDEO_EXTENSIONS:
+        raise HTTPException(400, f"Not a recognized video extension: {ext or '(none)'}")
+
+    dest_dir = os.path.join(UPLOADS_DIR, uuid.uuid4().hex)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, os.path.basename(file.filename))
+
+    try:
+        with open(dest_path, "wb") as out:
+            shutil.copyfileobj(file.file, out, length=4 * 1024 * 1024)
+    finally:
+        await file.close()
+
+    item_id = db.add_item(dest_path, source="upload",
+                          subject_area_override=subject_area or None,
+                          docmost_space_id=docmost_space_id or None)
+    if item_id == -1:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        raise HTTPException(409, "That file is already queued or in the library")
+    return {"id": item_id, "message": "Uploaded — will process within ~1 minute"}
 
 
 @app.get("/api/library")
@@ -281,6 +468,11 @@ def retry_item(item_id: int):
 def delete_item(item_id: int):
     db.delete_item(item_id)
     return {"ok": True}
+
+
+@app.get("/api/docmost/spaces")
+def get_docmost_spaces():
+    return {"spaces": list_spaces()}
 
 
 @app.get("/api/stats")
@@ -325,6 +517,8 @@ def get_config():
         safe["gmail_oauth"]["client_secret"] = "••••••••"
     if safe.get("reddit", {}).get("client_secret"):
         safe["reddit"]["client_secret"] = "••••••••"
+    if safe.get("smb", {}).get("password"):
+        safe["smb"]["password"] = "••••••••"
     return safe
 
 
@@ -347,6 +541,11 @@ def update_config(new_config: dict):
         saved_secret = current.get("reddit", {}).get("client_secret", "")
         if saved_secret:
             new_config.setdefault("reddit", {})["client_secret"] = saved_secret
+    incoming_smb_pw = new_config.get("smb", {}).get("password", "")
+    if not incoming_smb_pw or incoming_smb_pw.startswith("•"):
+        saved_smb_pw = current.get("smb", {}).get("password", "")
+        if saved_smb_pw:
+            new_config.setdefault("smb", {})["password"] = saved_smb_pw
     save_config(new_config)
     try:
         interval = int(new_config.get("email", {}).get("check_interval_minutes", 5))
@@ -418,7 +617,8 @@ def reclassify_item(item_id: int, req: ReclassifyRequest):
             md_content = f.read()
         area = req.subject_area if req.subject_area is not None else item.get("subject_area", "misc")
         try:
-            result = upsert_page(item.get("title") or "Unknown", md_content, area)
+            result = upsert_page(item.get("title") or "Unknown", md_content, area,
+                                 space_id=item.get("docmost_space_id"))
             if result:
                 db.update_item(item_id, docmost_page_id=result["page_id"], docmost_url=result["url"])
         except Exception as e:
@@ -439,7 +639,8 @@ def sync_docmost(item_id: int):
     result = upsert_page(
         item.get("title") or "Unknown",
         md_content,
-        item.get("subject_area") or "misc"
+        item.get("subject_area") or "misc",
+        space_id=item.get("docmost_space_id")
     )
     if not result:
         raise HTTPException(500, "DocMost sync failed — check logs and DocMost config in Settings")

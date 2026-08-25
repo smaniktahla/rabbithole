@@ -215,12 +215,38 @@ def _md_to_tiptap(md: str) -> dict:
     }
 
 
+# ── Spaces ────────────────────────────────────────────────────────────────────
+
+def list_spaces() -> list:
+    """
+    Return [{"id":..., "name":..., "slug":...}, ...] for all spaces in the
+    configured DocMost Postgres DB. Used to populate workspace pickers in
+    the UI. Returns [] on failure/disabled.
+    """
+    config = load_config()
+    dm = config.get("docmost", {})
+    if not dm.get("db_password"):
+        return []
+    try:
+        conn = _get_conn(config)
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, slug FROM spaces ORDER BY name ASC")
+        rows = cur.fetchall()
+        conn.close()
+        return [{"id": str(r["id"]), "name": r["name"], "slug": r["slug"]} for r in rows]
+    except Exception as e:
+        logger.error(f"DocMost list_spaces error: {e}", exc_info=True)
+        return []
+
+
 # ── Main upsert ───────────────────────────────────────────────────────────────
 
-def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[dict]:
+def upsert_page(title: str, md_content: str, subject_area: str,
+                space_id: Optional[str] = None) -> Optional[dict]:
     """
     Write or update a DocMost page via direct Postgres.
     Returns {"page_id": ..., "url": ...} on success, None on failure/disabled.
+    `space_id` overrides the configured default space when given.
     """
     config = load_config()
     dm = config.get("docmost", {})
@@ -231,7 +257,7 @@ def upsert_page(title: str, md_content: str, subject_area: str) -> Optional[dict
         logger.warning("DocMost enabled but db_password not set")
         return None
 
-    space_id = dm.get("space_id", "0196753b-62a3-7d2b-8d23-473d8bd58bff")
+    space_id = space_id or dm.get("space_id", "0196753b-62a3-7d2b-8d23-473d8bd58bff")
     page_title = f"[{subject_area}] {title}"
     tiptap = _md_to_tiptap(md_content)
     content_json = json.dumps(tiptap)

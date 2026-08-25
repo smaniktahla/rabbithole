@@ -32,6 +32,13 @@ DEFAULT_CONFIG = {
         "client_id": "",
         "client_secret": ""
     },
+    "smb": {
+        "default_host": "",
+        "username": "",
+        "password": "",
+        "domain": "",
+        "port": 445
+    },
     "default_storage_path": "/mnt/documents/RabbitHole"
 }
 
@@ -57,6 +64,9 @@ def load_config() -> Dict[str, Any]:
     merged_rd = DEFAULT_CONFIG["reddit"].copy()
     merged_rd.update(config.get("reddit", {}))
     config["reddit"] = merged_rd
+    merged_smb = DEFAULT_CONFIG["smb"].copy()
+    merged_smb.update(config.get("smb", {}))
+    config["smb"] = merged_smb
     return config
 
 

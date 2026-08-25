@@ -53,17 +53,24 @@ def init_db():
             conn.commit()
         except Exception:
             pass
+        # Migrate: add docmost_space_id if missing
+        try:
+            conn.execute("ALTER TABLE items ADD COLUMN docmost_space_id TEXT")
+            conn.commit()
+        except Exception:
+            pass
         conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_url ON items(url)")
         conn.commit()
 
 
-def add_item(url: str, source: str = "manual", subject_area_override: str = None) -> int:
+def add_item(url: str, source: str = "manual", subject_area_override: str = None,
+             docmost_space_id: str = None) -> int:
     """Insert item. Returns rowid, or -1 if URL already exists."""
     with get_conn() as conn:
         try:
             cur = conn.execute(
-                "INSERT INTO items (url, source, status, subject_area) VALUES (?, ?, 'queued', ?)",
-                (url, source, subject_area_override)
+                "INSERT INTO items (url, source, status, subject_area, docmost_space_id) VALUES (?, ?, 'queued', ?, ?)",
+                (url, source, subject_area_override, docmost_space_id)
             )
             conn.commit()
             return cur.lastrowid

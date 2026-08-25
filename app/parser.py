@@ -8,10 +8,10 @@ from transcriber import truncate_transcript
 
 logger = logging.getLogger("rabbithole.parser")
 
-_SYSTEM = "You are a research assistant that analyzes YouTube video transcripts and returns structured JSON."
+_SYSTEM = "You are a research assistant that analyzes video transcripts and returns structured JSON."
 
 _PROMPT = """\
-Analyze this YouTube video and produce a structured knowledge-base entry.
+Analyze this video and produce a structured knowledge-base entry.
 
 **Title**: {title}
 **Channel**: {channel}

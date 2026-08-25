@@ -428,12 +428,26 @@
         <div class="section-label">drop a link</div>
         <div class="submit-card">
           <div class="url-row">
-            <input id="url-in" class="url-input" type="url" placeholder="https://youtube.com/watch?v=... or reddit.com/r/.../comments/..." />
+            <input id="url-in" class="url-input" type="text" placeholder="YouTube or Reddit URL" />
             <button id="submit-btn" class="submit-btn" onclick="submitUrl()">Queue →</button>
           </div>
           <select id="area-cap" class="area-select">
             <option value="">Auto-classify primary category</option>
           </select>
+          <select id="workspace-cap" class="area-select" style="margin-top:8px;display:none">
+            <option value="">Default workspace</option>
+          </select>
+
+          <div style="display:flex;align-items:center;gap:10px;margin:14px 0 8px">
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+            <span style="font-family:var(--ff-mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-muted)">or</span>
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+          </div>
+          <div class="url-row">
+            <input type="file" id="file-in" class="url-input" style="padding:9px 12px" accept=".mp4,.mov,.mkv,.avi,.webm,.m4v,.ts,.wmv,.flv,.mpg,.mpeg,video/*" />
+            <button id="upload-btn" class="submit-btn" onclick="uploadFile()">Upload →</button>
+          </div>
+          <div style="font-size:10px;color:var(--text-muted)">Upload a video file straight from this device — transcribed then discarded, nothing kept.</div>
         </div>
 
         <div class="section-label" style="margin-top:22px">recent activity</div>
@@ -540,6 +554,23 @@
         <div class="form-row"><label class="form-label">Client Secret</label><input class="form-input" id="c-rd-secret" type="password" placeholder="••••••••" /></div>
       </div>
 
+      <div class="settings-card">
+        <div class="sc-title">🗄 SMB / Network Video Files (advanced)</div>
+        <div style="font-size:11px;color:var(--text-dim);line-height:1.6;margin-bottom:10px">
+          For a file that's too big to upload, or lives on a NAS/network share rather than the device
+          in front of you: paste a Windows path (e.g. <code style="color:var(--amber)">C:\Users\you\Videos\clip.mp4</code>)
+          or a full share path (<code style="color:var(--amber)">\\host\share\clip.mp4</code>) into the
+          Capture URL box instead of using Upload. RabbitHole reaches out over SMB, downloads it,
+          transcribes it, then discards the copy — for this to work the file's machine needs SMB/file
+          sharing enabled and reachable on the LAN. For most files just use Upload above; you don't
+          need any of this.
+        </div>
+        <div class="form-row"><label class="form-label">Default Host (for drive-letter paths, e.g. C:\...)</label><input class="form-input" id="c-smb-host" placeholder="10.10.10.104 or hostname" /></div>
+        <div class="form-row"><label class="form-label">Username</label><input class="form-input" id="c-smb-user" placeholder="salil" /></div>
+        <div class="form-row"><label class="form-label">Password</label><input class="form-input" id="c-smb-pass" type="password" placeholder="••••••••" /></div>
+        <div class="form-row"><label class="form-label">Domain / Workgroup (optional)</label><input class="form-input" id="c-smb-domain" placeholder="WORKGROUP" /></div>
+      </div>
+
       <div class="settings-card wide">
         <div class="sc-title" style="justify-content:space-between">
           <span>📚 DocMost (Direct DB)</span>
@@ -551,7 +582,12 @@
         <div class="dm-fields" id="dm-fields">
           <div class="form-row" style="margin:0"><label class="form-label">Postgres Host</label><input class="form-input" id="c-dm-url" placeholder="10.10.10.201" /></div>
           <div class="form-row" style="margin:0"><label class="form-label">DB Password</label><input class="form-input" id="c-dm-tok" type="password" placeholder="••••••••" /></div>
-          <div class="form-row" style="margin:0"><label class="form-label">Space ID</label><input class="form-input" id="c-dm-space" placeholder="0196753b-…" /></div>
+          <div class="form-row" style="margin:0">
+            <label class="form-label">Default Workspace</label>
+            <select class="form-input" id="c-dm-space">
+              <option value="">— select after saving DB connection —</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -622,6 +658,7 @@ let modalItem = null;
 let modalDirty = false;
 let tagEditMode = false;
 let knownAreas = [];   // union of config + db subject areas
+let docmostSpaces = []; // [{id,name,slug}] from DocMost install
 
 /* ── Tab nav ──────────────────────────────────────────────────────────────── */
 document.querySelectorAll('.nav-tab').forEach(t => t.addEventListener('click', () => {
@@ -661,17 +698,19 @@ function tagsHtml(t)  {
 }
 function dot(status)  { return `<span class="status-dot dot-${status}"></span>`; }
 function isReddit(item) { return /reddit\.com|redd\.it/i.test(item.url||''); }
-function sourceIcon(item) { return isReddit(item) ? '👽' : '📺'; }
+function isLocalFile(item) { return !/^https?:\/\//i.test(item.url||''); }
+function sourceIcon(item) { return isReddit(item) ? '👽' : isLocalFile(item) ? '🎬' : '📺'; }
 
 /* ── Capture ──────────────────────────────────────────────────────────────── */
 async function submitUrl() {
   const url = document.getElementById('url-in').value.trim();
   const area = document.getElementById('area-cap').value;
+  const workspace = document.getElementById('workspace-cap')?.value || '';
   if(!url){ toast('Paste a YouTube or Reddit URL first','err'); return; }
   const btn = document.getElementById('submit-btn');
   btn.disabled = true; btn.textContent = '...';
   try {
-    const r = await fetch('/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url, subject_area: area||null})});
+    const r = await fetch('/api/submit', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url, subject_area: area||null, docmost_space_id: workspace||null})});
     const d = await r.json();
     if(!r.ok) throw new Error(d.detail||'Error');
     document.getElementById('url-in').value = '';
@@ -679,6 +718,29 @@ async function submitUrl() {
     loadStats(); loadRecent();
   } catch(e){ toast(e.message,'err'); }
   finally { btn.disabled=false; btn.textContent='Queue →'; }
+}
+
+async function uploadFile() {
+  const inp = document.getElementById('file-in');
+  const f = inp.files[0];
+  if(!f){ toast('Choose a video file first','err'); return; }
+  const area = document.getElementById('area-cap').value;
+  const workspace = document.getElementById('workspace-cap')?.value || '';
+  const btn = document.getElementById('upload-btn');
+  btn.disabled = true; btn.textContent = '...';
+  const fd = new FormData();
+  fd.append('file', f);
+  if(area) fd.append('subject_area', area);
+  if(workspace) fd.append('docmost_space_id', workspace);
+  try {
+    const r = await fetch('/api/submit-file', {method:'POST', body: fd});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Upload failed');
+    inp.value = '';
+    toast('Uploaded ✓ — processing within ~1 min','ok');
+    loadStats(); loadRecent();
+  } catch(e){ toast(e.message,'err'); }
+  finally { btn.disabled=false; btn.textContent='Upload →'; }
 }
 
 async function loadStats() {
@@ -720,6 +782,27 @@ function fillAreaDropdowns() {
   const cur = af.value;
   af.innerHTML = '<option value="">All areas</option>' + capOpts;
   af.value = cur;
+}
+
+async function loadDocmostSpaces() {
+  try {
+    const d = await fetch('/api/docmost/spaces').then(r=>r.json());
+    docmostSpaces = d.spaces||[];
+  } catch(e) { docmostSpaces = []; console.error(e); }
+  const capSel = document.getElementById('workspace-cap');
+  if (capSel) {
+    const defaultId = cfg.docmost?.space_id || '';
+    capSel.innerHTML = '<option value="">Default workspace</option>' +
+      docmostSpaces.filter(s=>s.id!==defaultId).map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+    capSel.style.display = (cfg.docmost?.enabled && docmostSpaces.length) ? '' : 'none';
+  }
+  const setSel = document.getElementById('c-dm-space');
+  if (setSel) {
+    const cur = cfg.docmost?.space_id || '';
+    setSel.innerHTML = docmostSpaces.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')
+      || '<option value="">— save DB connection first —</option>';
+    setSel.value = cur;
+  }
 }
 
 async function loadRecent() {
@@ -812,7 +895,9 @@ async function openModal(id) {
     document.getElementById('m-meta').innerHTML =
       (item.channel?`<span>${sourceIcon(item)} ${item.channel}</span>`:'') +
       (item.processed_at?`<span>📅 ${new Date(item.processed_at).toLocaleDateString()}</span>`:'') +
-      `<span>🔗 <a href="${item.url}" target="_blank" style="color:var(--blue)">${item.url.slice(0,60)}…</a></span>`;
+      (isLocalFile(item)
+        ? `<span>📁 ${item.url}</span>`
+        : `<span>🔗 <a href="${item.url}" target="_blank" style="color:var(--blue)">${item.url.slice(0,60)}…</a></span>`);
     document.getElementById('m-badges').innerHTML = areaBadge(item.subject_area)+' '+srcBadge(item.source);
     document.getElementById('m-summary').textContent = item.summary||'No summary available.';
     document.getElementById('m-path').textContent = item.file_path||'Not yet written to disk';
@@ -834,7 +919,7 @@ async function openModal(id) {
     document.getElementById('m-save-btn').classList.remove('dirty');
 
     document.getElementById('m-footer').innerHTML =
-      `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on ${isReddit(item)?'Reddit':'YouTube'} ↗</a>` +
+      (isLocalFile(item) ? '' : `<a href="${item.url}" target="_blank" class="btn-sm btn-blue">Open on ${isReddit(item)?'Reddit':'YouTube'} ↗</a>`) +
       (item.file_path?`<a href="/api/library/${item.id}/file" target="_blank" class="btn-sm btn-blue">Open Doc ↗</a>`:'') +
       (item.docmost_url
         ? `<a href="${item.docmost_url}" target="_blank" class="btn-sm btn-blue">DocMost ✓ ↗</a>`
@@ -1039,8 +1124,13 @@ async function loadSettings(){
     setVal('c-gm-secret', cfg.gmail_oauth?.client_secret||'');
     setVal('c-rd-id',     cfg.reddit?.client_id||'');
     setVal('c-rd-secret', cfg.reddit?.client_secret||'');
+    setVal('c-smb-host',   cfg.smb?.default_host||'');
+    setVal('c-smb-user',   cfg.smb?.username||'');
+    setVal('c-smb-pass',   cfg.smb?.password||'');
+    setVal('c-smb-domain', cfg.smb?.domain||'');
     toggleDM(); renderSA(cfg.subject_areas||[]);
     refreshOAuthStatus();
+    loadDocmostSpaces();
   } catch(e){ console.error(e); }
 }
 
@@ -1110,7 +1200,12 @@ async function saveSettings(){
     gmail_oauth:{ client_id:document.getElementById('c-gm-id').value.trim(),
                   client_secret:document.getElementById('c-gm-secret').value },
     reddit:{ client_id:document.getElementById('c-rd-id').value.trim(),
-             client_secret:document.getElementById('c-rd-secret').value }
+             client_secret:document.getElementById('c-rd-secret').value },
+    smb:{ default_host:document.getElementById('c-smb-host').value.trim(),
+          username:document.getElementById('c-smb-user').value.trim(),
+          password:document.getElementById('c-smb-pass').value,
+          domain:document.getElementById('c-smb-domain').value.trim(),
+          port:445 }
   };
   try {
     const r = await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(nc)});
@@ -1214,6 +1309,7 @@ async function init(){
   checkOAuthParam();
   try { cfg = await fetch('/api/config', {cache:'no-store'}).then(r=>r.json()); } catch(_){}
   fillAreaDropdowns();
+  loadDocmostSpaces();
   loadStats();
   loadRecent();
   setInterval(()=>{ loadStats(); if(document.querySelector('.nav-tab.active')?.dataset.tab==='capture') loadRecent(); }, 28000);

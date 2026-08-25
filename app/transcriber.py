@@ -297,6 +297,166 @@ def _parse_json3(raw: str) -> str:
         return ""
 
 
+LOCAL_VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
+    ".ts", ".wmv", ".flv", ".mpg", ".mpeg",
+}
+
+# Where browser-uploaded videos land before transcription. Each upload gets
+# its own uuid subfolder (so the original filename survives untouched),
+# and the whole subfolder is deleted once transcription finishes.
+UPLOADS_DIR = "/app/data/uploads"
+
+
+def is_uploaded_file_path(raw: str) -> bool:
+    return (raw or "").startswith(UPLOADS_DIR + os.sep)
+
+# Windows drive-letter path: C:\... or C:/...
+_DRIVE_LETTER_RE = re.compile(r'^[A-Za-z]:[\\/]')
+# UNC path: \\host\share\...
+_UNC_RE = re.compile(r'^\\\\[^\\/]+\\[^\\/]+')
+_SMB_URI_RE = re.compile(r'^smb://', re.IGNORECASE)
+
+
+def strip_wrapping_quotes(raw: str) -> str:
+    """Windows Explorer's "Copy as path" wraps the result in double quotes —
+    strip those (or single quotes) if present, so pasted paths just work."""
+    raw = (raw or "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        raw = raw[1:-1].strip()
+    return raw
+
+
+def is_smb_video_path(raw: str) -> bool:
+    """True if `raw` looks like a Windows drive-letter path, a UNC path, or
+    an smb:// URI pointing at a video file — i.e. something we should fetch
+    over SMB rather than treat as a YouTube/Reddit URL."""
+    raw = strip_wrapping_quotes(raw)
+    if not raw:
+        return False
+    ext = os.path.splitext(raw)[1].lower()
+    if ext not in LOCAL_VIDEO_EXTENSIONS:
+        return False
+    return bool(_DRIVE_LETTER_RE.match(raw) or _UNC_RE.match(raw) or _SMB_URI_RE.match(raw))
+
+
+def parse_smb_path(raw: str, default_host: str = None) -> Tuple[str, str, str]:
+    """
+    Parse a drive-letter path, UNC path, or smb:// URI into (host, share, rel_path).
+    A bare drive-letter path (C:\\...) has no host of its own — it's resolved
+    against `default_host` (the "Default SMB Host" in Settings) using the
+    Windows admin share convention (C: -> C$).
+    Raises ValueError with a human-readable reason if it can't be resolved.
+    """
+    raw = strip_wrapping_quotes(raw)
+
+    if _SMB_URI_RE.match(raw):
+        rest = raw[len("smb://"):]
+        parts = [p for p in rest.split("/") if p]
+        if len(parts) < 2:
+            raise ValueError("smb:// URI must include a host and a share")
+        host, share = parts[0], parts[1]
+        rel_path = "\\".join(parts[2:])
+    elif _UNC_RE.match(raw):
+        parts = [p for p in raw.split("\\") if p]
+        if len(parts) < 2:
+            raise ValueError("UNC path must include a host and a share")
+        host, share = parts[0], parts[1]
+        rel_path = "\\".join(parts[2:])
+    elif _DRIVE_LETTER_RE.match(raw):
+        if not default_host:
+            raise ValueError(
+                "This is a local drive-letter path — set a \"Default SMB Host\" "
+                "in Settings (the IP of the machine this file lives on), or "
+                "paste the full \\\\host\\share\\... path instead"
+            )
+        drive = raw[0].upper()
+        host = default_host
+        share = f"{drive}$"
+        rel_path = raw[2:].lstrip("\\/").replace("/", "\\")
+    else:
+        raise ValueError("Not a recognized local, UNC, or smb:// video path")
+
+    if not rel_path:
+        raise ValueError("Path has a host/share but no file")
+    return host, share, rel_path
+
+
+def title_from_filename(path: str) -> str:
+    """Derive a display title from either a POSIX or Windows-style path."""
+    name = re.split(r'[\\/]', path)[-1]
+    name = os.path.splitext(name)[0]
+    name = re.sub(r"[._]+", " ", name).strip()
+    return name or "Untitled"
+
+
+def parent_folder_name(path: str) -> Optional[str]:
+    """Name of the immediate containing folder, from either path style."""
+    parts = [p for p in re.split(r'[\\/]', path) if p]
+    return parts[-2] if len(parts) >= 2 else None
+
+
+def _smb_session_kwargs(smb_cfg: dict) -> dict:
+    # smbclient.register_session() has no `domain` parameter — NTLM domain
+    # is expressed by prefixing the username as "DOMAIN\\user" instead.
+    username = smb_cfg.get("username") or None
+    domain = smb_cfg.get("domain") or None
+    if username and domain and "\\" not in username and "@" not in username:
+        username = f"{domain}\\{username}"
+    return {
+        "username": username,
+        "password": smb_cfg.get("password") or None,
+        "port": int(smb_cfg.get("port") or 445),
+    }
+
+
+def smb_file_exists(host: str, share: str, rel_path: str, smb_cfg: dict) -> bool:
+    import smbclient
+    smbclient.register_session(host, **_smb_session_kwargs(smb_cfg))
+    unc = f"\\\\{host}\\{share}\\{rel_path}"
+    return smbclient.path.isfile(unc)
+
+
+def fetch_smb_file(host: str, share: str, rel_path: str, smb_cfg: dict, dest_dir: str) -> str:
+    """
+    Downloads a file from an SMB share into a local temp file inside
+    `dest_dir`. Returns the local path. Caller is responsible for cleaning
+    up `dest_dir` once done (transcription reads it, then it's discarded).
+    """
+    import shutil
+    import tempfile
+    import smbclient
+
+    smbclient.register_session(host, **_smb_session_kwargs(smb_cfg))
+    unc = f"\\\\{host}\\{share}\\{rel_path}"
+    ext = os.path.splitext(rel_path)[1] or ".mp4"
+    fd, local_path = tempfile.mkstemp(suffix=ext, prefix="rh_smb_", dir=dest_dir)
+    os.close(fd)
+    with smbclient.open_file(unc, mode="rb") as remote_f, open(local_path, "wb") as local_f:
+        shutil.copyfileobj(remote_f, local_f, length=4 * 1024 * 1024)
+    return local_path
+
+
+def transcribe_local_file(path: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Runs local Whisper speech-to-text directly on a video file on disk
+    (faster-whisper decodes audio from the container via PyAV, so no
+    separate audio-extraction step is needed). Returns (text, error_message).
+    """
+    try:
+        model = _get_whisper_model()
+        segments, _info = model.transcribe(path, language="en")
+        text = " ".join(seg.text.strip() for seg in segments)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if text:
+            logger.info(f"[{path}] Transcript via Whisper ({len(text)} chars)")
+            return text, None
+        return None, "Whisper produced no speech (silent or non-English audio?)"
+    except Exception as e:
+        logger.error(f"[{path}] Local Whisper transcription failed: {e}")
+        return None, str(e)
+
+
 def truncate_transcript(text: str, max_chars: int = 14000) -> str:
     if len(text) <= max_chars:
         return text

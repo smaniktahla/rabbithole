@@ -297,9 +297,10 @@ def _parse_json3(raw: str) -> str:
         return ""
 
 
-LOCAL_VIDEO_EXTENSIONS = {
+LOCAL_MEDIA_EXTENSIONS = {
     ".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v",
     ".ts", ".wmv", ".flv", ".mpg", ".mpeg",
+    ".m4a", ".mp3", ".wav", ".aac", ".ogg", ".flac",
 }
 
 # Where browser-uploaded videos land before transcription. Each upload gets
@@ -335,7 +336,7 @@ def is_smb_video_path(raw: str) -> bool:
     if not raw:
         return False
     ext = os.path.splitext(raw)[1].lower()
-    if ext not in LOCAL_VIDEO_EXTENSIONS:
+    if ext not in LOCAL_MEDIA_EXTENSIONS:
         return False
     return bool(_DRIVE_LETTER_RE.match(raw) or _UNC_RE.match(raw) or _SMB_URI_RE.match(raw))
 

@@ -26,7 +26,7 @@ from storage import write_markdown, write_reddit_markdown
 from transcriber import (get_transcript, is_smb_video_path, parse_smb_path,
                          smb_file_exists, fetch_smb_file, strip_wrapping_quotes,
                          title_from_filename, parent_folder_name, transcribe_local_file,
-                         LOCAL_VIDEO_EXTENSIONS, UPLOADS_DIR, is_uploaded_file_path)
+                         LOCAL_MEDIA_EXTENSIONS, UPLOADS_DIR, is_uploaded_file_path)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -413,8 +413,8 @@ async def submit_file(file: UploadFile = File(...),
                       subject_area: Optional[str] = Form(None),
                       docmost_space_id: Optional[str] = Form(None)):
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in LOCAL_VIDEO_EXTENSIONS:
-        raise HTTPException(400, f"Not a recognized video extension: {ext or '(none)'}")
+    if ext not in LOCAL_MEDIA_EXTENSIONS:
+        raise HTTPException(400, f"Not a recognized video/audio extension: {ext or '(none)'}")
 
     dest_dir = os.path.join(UPLOADS_DIR, uuid.uuid4().hex)
     os.makedirs(dest_dir, exist_ok=True)

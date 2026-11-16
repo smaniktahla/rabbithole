@@ -58,6 +58,11 @@ Two modes:
 
 Forward any email containing a YouTube or Reddit URL with `[RH]` in the subject and it gets queued automatically.
 
+## Share links and receive processing updates
+
+- **Share-sheet and webhook submissions** — `POST /api/submit` accepts a bare URL or text containing a link, such as a title followed by a URL from an Android share sheet. RabbitHole uses the first HTTP(S) URL in the text. ([#2](https://github.com/smaniktahla/rabbithole/pull/2))
+- **Completion and failure notifications** — RabbitHole can notify an ATQ service when processing finishes or fails. Forwarding to WhatsApp requires an ATQ/Hermes setup that delivers those notifications. Configure the service and recipient with `ATQ_URL` and `ATQ_NOTIFY_TARGET`, and set `DOCMOST_URL` for links to synced notes. Notification failures are logged and processing continues. ([#1](https://github.com/smaniktahla/rabbithole/pull/1))
+
 ## Reddit capture
 
 Reddit closed self-serve OAuth app registration in Nov 2025 ("Responsible Builder Policy"), so RabbitHole doesn't depend on Reddit API credentials at all. A plain HTTP request to `.json` gets blocked (403) even with a normal User-Agent, but a *browser session with real cookies* is allowed through — so RabbitHole uses a headless Chromium (Playwright) to load the post's real page first, then fetches the `.json` data from that same session. No Reddit account, app, or credentials needed.
